@@ -82,6 +82,7 @@ body {
 .tool:focus-visible, #dam-btn:focus-visible, .shop-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 #field { position: relative; min-height: 0; }
+#fx { touch-action: none; }
 #field canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #stats {
   position: absolute;
@@ -394,6 +395,7 @@ function freshState() {
     lv: BALLS.map(() => ({ rate: 0, value: 0, perk: 0 })),
     store: BALLS.map(() => 0),
     crystals: 0, runs: 0, perm: { rate: 0, value: 0, cap: 0 },
+    gatePos: [], dragged: false,
     tab: 0, tapped: false, savedAt: Date.now(),
   };
 }
@@ -522,14 +524,26 @@ function layout() {
     const f = Math.floor(i / 3), s = i % 3;
     const [type, m] = GATE_PLAN[f][s];
     const slot = SLOTS[s];
-    const y = Math.round((f * floorH + floorH * slot.y) / ROW_GAP) * ROW_GAP;
     // A lone first gate spans the board, so every early ball shows what it does.
-    const alone = S.gates === 1;
-    gates.push({ type, m, x0: alone ? 0.1 : slot.x0, x1: alone ? 0.9 : slot.x1, y, bit: 1 << i, flash: old[i] ? old[i].flash : 0 });
+    const half = (S.gates === 1 ? 0.8 : slot.x1 - slot.x0) / 2;
+    const saved = S.gatePos[i] || { cx: (slot.x0 + slot.x1) / 2, fy: slot.y };
+    const G = { i, f, type, m, half, x0: 0, x1: 0, y: 0, bit: 1 << i, flash: old[i] ? old[i].flash : 0 };
+    placeGate(G, saved.cx, f * floorH + saved.fy * floorH);
+    gates.push(G);
   }
   gridRows = Math.ceil((RES + 0.1) / CELL) + 1;
   gridHead = new Int16Array(GRID_COLS * gridRows);
   if (bgCtx) drawBg();
+}
+/* Gates slide freely but stay inside their floor, on the lines between peg rows. */
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const gateLimits = G => [G.f * floorH + 0.08 * floorH, G.f * floorH + (G.f === S.floors - 1 ? 0.92 : 0.74) * floorH];
+function placeGate(G, cx, y) {
+  const centre = clamp(cx, G.half + 0.02, 1 - G.half - 0.02);
+  const [top, bottom] = gateLimits(G);
+  G.x0 = centre - G.half;
+  G.x1 = centre + G.half;
+  G.y = Math.round(clamp(y, top, bottom) / ROW_GAP) * ROW_GAP;
 }
 function gateMult(g) {
   return g.type === 'value' ? g.m * (1 + 0.5 * S.boost) : g.m;
@@ -1152,12 +1166,27 @@ function drawGates(c) {
   for (const G of gates) {
     const color = G.type === 'split' ? C.split : C.value;
     const x0 = WX(G.x0), x1 = WX(G.x1), y = WY(G.y);
-    const glow = G.flash;
+    const glow = G.flash, held = drag && drag.G === G;
+    if (held) {
+      const [top, bottom] = gateLimits(G);
+      c.globalAlpha = 0.1;
+      c.fillStyle = color;
+      c.fillRect(0, WY(top), W, WY(bottom) - WY(top));
+    }
     c.globalAlpha = 0.2 + 0.3 * glow;
     c.fillStyle = color;
     c.fillRect(x0, y - 9, x1 - x0, 18);
     c.globalAlpha = 1;
     c.fillRect(x0, y - 2 - glow, x1 - x0, 4 + 2 * glow);
+    c.fillStyle = C.deep;
+    for (const end of [x0 + 7, x1 - 7]) {
+      for (let g = -3; g <= 3; g += 3) c.fillRect(end + g - 0.5, y - 5, 1, 10);
+    }
+    if (held) {
+      c.strokeStyle = C.ink;
+      c.lineWidth = 2;
+      c.strokeRect(x0, y - 9, x1 - x0, 18);
+    }
     const label = `${G.type === 'split' ? 'PALLINE' : 'VALORE'} ×${fmtMult(gateMult(G))}`;
     c.font = `700 ${12 + 2 * glow}px ${fontBody}`;
     const tw = c.measureText(label).width + 10;
@@ -1438,7 +1467,10 @@ function refreshUI() {
     setText(slot.cost, item.costText || (item.can && isFinite(item.cost) ? `${fmt(item.cost)}${item.crystal ? ' ◆' : ''}` : ''));
     setText(slot.effect, item.effect);
   });
-  hintEl.hidden = !!S.tapped;
+  const hint = !S.tapped ? 'Tocca lo schermo per caricare più in fretta'
+    : S.gates >= 2 && !S.dragged ? 'Trascina una barriera per spostarla' : '';
+  hintEl.hidden = !hint;
+  setText(hintEl, hint);
 }
 
 function showBanner(big, small, note) {
@@ -1470,7 +1502,7 @@ function openRebuild() {
 function rebuild() {
   const gain = crystalGain();
   if (gain < 1) return false;
-  const keep = { crystals: S.crystals + gain, runs: S.runs + 1, perm: S.perm, best: S.best, tapped: S.tapped, tab: CRYSTAL_TAB };
+  const keep = { crystals: S.crystals + gain, runs: S.runs + 1, perm: S.perm, best: S.best, tapped: S.tapped, gatePos: S.gatePos, dragged: S.dragged, tab: CRYSTAL_TAB };
   Object.assign(S, freshState(), keep);
   resetRun();
   flash = 1;
@@ -1493,12 +1525,52 @@ function tryOpen() {
   refreshUI();
 }
 damBtn.addEventListener('click', tryOpen);
-fxCanvas.addEventListener('pointerdown', e => {
-  audio.init();
+/* A press on a gate grabs it; a press anywhere else, or a gate press that never moves, is a tap. */
+let drag = null;
+const toWorld = e => {
+  const r = fxCanvas.getBoundingClientRect();
+  return { px: e.clientX - r.left, py: e.clientY - r.top };
+};
+function gateAt(px, py) {
+  let best = null, bestD = 20;
+  for (const G of gates) {
+    const d = Math.abs(py - WY(G.y));
+    if (d < bestD && px >= WX(G.x0) - 8 && px <= WX(G.x1) + 8) { best = G; bestD = d; }
+  }
+  return best;
+}
+function onTap() {
   tapCharge();
   S.tapped = true;
   audio.blip(2);
+}
+fxCanvas.addEventListener('pointerdown', e => {
+  audio.init();
+  const { px, py } = toWorld(e);
+  const G = py > view.resPx ? gateAt(px, py) : null;
+  if (!G) { onTap(); return; }
+  drag = { G, id: e.pointerId, startX: px, startY: py, grabX: px - WX((G.x0 + G.x1) / 2), grabY: py - WY(G.y), moved: false };
+  fxCanvas.setPointerCapture(e.pointerId);
 });
+fxCanvas.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const { px, py } = toWorld(e);
+  if (!drag.moved && Math.hypot(px - drag.startX, py - drag.startY) < 7) return;
+  drag.moved = true;
+  placeGate(drag.G, (px - drag.grabX) / view.W, (py - drag.grabY - view.resPx) / view.W);
+});
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const { G, moved } = drag;
+  drag = null;
+  if (!moved) { onTap(); return; }
+  S.gatePos[G.i] = { cx: (G.x0 + G.x1) / 2, fy: (G.y - G.f * floorH) / floorH };
+  S.dragged = true;
+  audio.click();
+  save();
+}
+fxCanvas.addEventListener('pointerup', endDrag);
+fxCanvas.addEventListener('pointercancel', endDrag);
 $('mute-btn').addEventListener('click', e => {
   audio.init();
   audio.setMuted(!audio.muted);
@@ -1615,7 +1687,7 @@ requestAnimationFrame(frame);
 
 /* Hooks for automated pacing and stress tests. */
 window.__valanga = {
-  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, leakRate, layout, hardReset, crystalItems, crystalGain, rebuild, welcomeBack, tapCharge, refreshKinds,
+  S, TUNE, BALLS, get gates() { return gates; }, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, leakRate, layout, hardReset, crystalItems, crystalGain, rebuild, welcomeBack, tapCharge, refreshKinds,
   set headless(v) { headless = v; if (v) bn = 0; },
   get bodies() { return bn; },
   set softCap(v) { softCap = v; },
