@@ -85,8 +85,8 @@ body {
 #field canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #stats {
   position: absolute;
-  left: 82px;
-  top: 4px;
+  left: 6px;
+  bottom: 8px;
   padding-inline: 5px;
   background: var(--ground-deep);
   font-size: 11px;
@@ -140,7 +140,7 @@ body {
 #dam-btn:disabled { cursor: default; }
 @keyframes throb { from { transform: scale(1); } to { transform: scale(1.025); filter: brightness(1.15); } }
 
-#tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+#tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
 .tab {
   position: relative;
   display: grid;
@@ -177,7 +177,7 @@ body {
 #hint {
   position: absolute;
   inset-inline: 16px;
-  bottom: 14px;
+  bottom: 34px;
   font-size: 14px;
   color: var(--ink);
   text-align: center;
@@ -201,6 +201,7 @@ body {
   cursor: pointer;
 }
 .shop-btn.wide { grid-column: 1 / -1; grid-row: span 2; align-content: center; }
+.shop-btn.span { grid-column: 1 / -1; }
 .shop-btn .effect { line-height: 1.2; }
 .shop-btn.wide .effect { white-space: normal; }
 .shop-btn .name { font-size: 15px; font-weight: 700; }
@@ -258,7 +259,7 @@ body {
     <canvas id="fx"></canvas>
     <div id="stats"></div>
     <div id="result" hidden></div>
-    <div id="hint" hidden>Tocca il tabellone per lanciare una pallina</div>
+    <div id="hint" hidden>Tocca lo schermo per caricare più in fretta</div>
   </main>
 
   <section id="controls">
@@ -266,7 +267,7 @@ body {
       <span class="main">APRI LA DIGA</span>
       <span class="sub">0%</span>
     </button>
-    <div id="tabs" role="tablist" aria-label="Palline e impianto"></div>
+    <div id="tabs" role="tablist" aria-label="Palline, diga e torre"></div>
     <div id="shop">
       <button class="shop-btn" id="slot-0" type="button"></button>
       <button class="shop-btn" id="slot-1" type="button"></button>
@@ -280,53 +281,56 @@ body {
 'use strict';
 /* ========================= Tuning ========================= */
 const TUNE = {
-  capBase: 900, capGrow: 1.45,
-  startFill: 0.25,
-  rateGrow: 1.13, valueGrow: 1.3, storeGrow: 1.1,
-  pressureBase: 1.5, pressureStep: 0.5,   // value = 1 + pressure * fill^3
+  capBase: 30, capGrow: 1.7,
+  leakBase: 0.1,        // balls per second that always slip through the gap
+  leakPerBall: 0.03,    // share of the stored balls escaping each second: the pressure
+  sealGrow: 0.85,
+  rateSteps: [1, 2, 3, 5, 8, 12], rateGrow: 1.14,      // the first levels are deliberately huge
+  valueSteps: [1, 2, 4, 6], valueGrow: 1.3,
+  bonusBase: 1.5, bonusStep: 0.5,                      // valanga value = 1 + bonus * pressure^3
   minOpen: 0.2,
-  costDam: [800, 3.6],
-  costGate: [400, 3.6],
+  costCap: [25, 3.4],
+  costSeal: [60, 5],
+  costBonus: [500, 6],
+  costGate: [15, 5.5],
   costBoost: [2e9, 6],
-  costFloor: [40000, 5e6],
-  costPress: [5000, 5],
+  costFloor: [20000, 8e6],
 };
-/* Each ball type feeds the dam on its own: stored balls per second = base rate * store.
-   Frequenza only raises the coin stream, so the dam speeds up through Riserva alone. */
+/* Balls are born behind the dam, one type at a time, and only leave through the gap. */
 const BALLS = [
   {
-    id: 'biglia', name: 'Biglia', hex: '#ffc23d', r: 0.0085, rate: 1, value: 1, store: 4,
-    grav: 1.5, bounce: 0.45, maxVy: 0.95, spread: 0.05, tapCd: 0.15, unlock: 0,
-    costs: { rate: [12, 2.4], value: [20, 2.6], store: [60, 2.6], perk: [150, 2.8] },
+    id: 'biglia', name: 'Biglia', hex: '#ffc23d', r: 0.0085, rate: 0.1, value: 1,
+    grav: 1.5, bounce: 0.45, maxVy: 0.95, tapBoost: 0.1, unlock: 0,
+    costs: { rate: [3, 2.7], value: [6, 2.9], perk: [60, 3] },
     perkName: 'Gemelle', perkMax: 10,
     perkText: l => `${l * 10}% → ${(l + 1) * 10}% di doppie`,
   },
   {
-    id: 'grandine', name: 'Grandine', hex: '#8fe8ff', r: 0.0055, rate: 0.6, value: 0.4, store: 6,
-    grav: 1.2, bounce: 0.55, maxVy: 0.8, spread: 0.3, tapCd: 0.15, unlock: 1200,
-    costs: { rate: [400, 2.4], value: [600, 2.6], store: [800, 2.6], perk: [3000, 3.2] },
+    id: 'grandine', name: 'Grandine', hex: '#8fe8ff', r: 0.0055, rate: 0.2, value: 0.4,
+    grav: 1.2, bounce: 0.55, maxVy: 0.8, tapBoost: 0.1, unlock: 300,
+    costs: { rate: [80, 3.2], value: [120, 3.4], perk: [600, 3.4] },
     perkName: 'Raffica', perkMax: 12,
     perkText: l => `${4 + l} → ${5 + l} chicchi a colpo`,
-    blurb: 'Piccola e leggera: arriva a raffiche e riempie bene la diga.',
+    blurb: 'Piccola e leggera: arriva a raffiche e alza subito la pressione.',
   },
   {
-    id: 'piombo', name: 'Piombo', hex: '#a9b8d6', r: 0.0125, rate: 0.25, value: 10, store: 4,
-    grav: 2.2, bounce: 0.12, maxVy: 1.25, spread: 0.08, tapCd: 1.5, unlock: 30000,
-    costs: { rate: [9000, 2.5], value: [15000, 2.7], store: [20000, 2.7], perk: [60000, 3.5] },
+    id: 'piombo', name: 'Piombo', hex: '#a9b8d6', r: 0.0125, rate: 0.05, value: 10,
+    grav: 2.2, bounce: 0.12, maxVy: 1.25, tapBoost: 0.04, unlock: 40000,
+    costs: { rate: [8000, 3.4], value: [12000, 3.6], perk: [50000, 3.6] },
     perkName: 'Zavorra', perkMax: 8,
     perkText: l => `+${l * 25}% → +${(l + 1) * 25}% a barriera`,
     blurb: 'Pesante e rara: cade veloce, rimbalza poco e vale molto.',
   },
   {
-    id: 'cometa', name: 'Cometa', hex: '#c66bff', r: 0.011, rate: 0.08, value: 60, store: 5,
-    grav: 1.5, bounce: 0.6, maxVy: 1.05, spread: 0.2, tapCd: 6, unlock: 2e6,
-    costs: { rate: [6e5, 2.6], value: [1e6, 2.8], store: [1.5e6, 2.8], perk: [2e7, 30] },
+    id: 'cometa', name: 'Cometa', hex: '#c66bff', r: 0.011, rate: 0.02, value: 60,
+    grav: 1.5, bounce: 0.6, maxVy: 1.05, tapBoost: 0.02, unlock: 2e6,
+    costs: { rate: [4e5, 3.4], value: [8e5, 3.6], perk: [1e7, 30] },
     perkName: 'Scia', perkMax: 2,
     perkText: l => `barriere valore ^${fmtMult(1.5 + l * 0.25)} → ^${fmtMult(1.75 + l * 0.25)}`,
     blurb: 'Rarissima: le barriere valore la moltiplicano molto di più.',
   },
 ];
-const PLANT_TAB = BALLS.length;
+const PLANT_TAB = BALLS.length, DAM_TAB = PLANT_TAB, TOWER_TAB = PLANT_TAB + 1;
 const MAX_FLOORS = 3;
 const GATE_PLAN = [
   [['split', 2], ['value', 2], ['split', 2]],
@@ -340,13 +344,13 @@ const SLOTS = [
 ];
 
 /* ========================= State ========================= */
-const SAVE_KEY = 'valanga.v2';
+const SAVE_KEY = 'valanga.v3';
 function freshState() {
   return {
-    coins: 0, total: 0, damLv: 0, pressLv: 0, gates: 1, floors: 1, boost: 0, best: 0,
+    coins: 0, total: 0, damLv: 0, sealLv: 0, bonusLv: 0, gates: 1, floors: 1, boost: 0, best: 0,
     owned: BALLS.map((b, i) => i === 0),
-    lv: BALLS.map(() => ({ rate: 0, value: 0, store: 0, perk: 0 })),
-    store: BALLS.map((b, i) => (i === 0 ? TUNE.startFill * TUNE.capBase : 0)),
+    lv: BALLS.map(() => ({ rate: 0, value: 0, perk: 0 })),
+    store: BALLS.map(() => 0),
     tab: 0, tapped: false, savedAt: Date.now(),
   };
 }
@@ -360,20 +364,22 @@ function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* ignored */ }
 }
 
-const rateOf = i => BALLS[i].rate * Math.pow(TUNE.rateGrow, S.lv[i].rate);
-const valueOf = i => BALLS[i].value * Math.pow(TUNE.valueGrow, S.lv[i].value);
-const storeOf = i => BALLS[i].store * Math.pow(TUNE.storeGrow, S.lv[i].store);
+const stepped = (steps, grow, lv) => (lv < steps.length ? steps[lv] : steps[steps.length - 1] * Math.pow(grow, lv - steps.length + 1));
+const rateAt = (i, lv) => BALLS[i].rate * stepped(TUNE.rateSteps, TUNE.rateGrow, lv);
+const valueAt = (i, lv) => BALLS[i].value * stepped(TUNE.valueSteps, TUNE.valueGrow, lv);
+const rateOf = i => rateAt(i, S.lv[i].rate);
+const valueOf = i => valueAt(i, S.lv[i].value);
 const damCap = () => TUNE.capBase * Math.pow(TUNE.capGrow, S.damLv);
 const damTotal = () => S.store.reduce((a, b) => a + b, 0);
 const damFill = () => Math.min(1, damTotal() / damCap());
-const fillOf = i => (S.owned[i] ? BALLS[i].rate * storeOf(i) : 0);
-const fillRate = () => BALLS.reduce((a, b, i) => a + fillOf(i), 0);
-const pressureMax = () => TUNE.pressureBase + TUNE.pressureStep * S.pressLv;
-const pressure = (f = damFill()) => 1 + pressureMax() * f * f * f;
+const leakK = () => TUNE.leakPerBall * Math.pow(TUNE.sealGrow, S.sealLv);
+const leakRate = () => (damTotal() > 0 ? TUNE.leakBase + leakK() * damTotal() : 0);
+const bonusMax = () => TUNE.bonusBase + TUNE.bonusStep * S.bonusLv;
+const pressure = (f = damFill()) => 1 + bonusMax() * f * f * f;
 
 /* Per-kind values read by the simulation loop, refreshed after every purchase. */
 const KRate = new Float64Array(BALLS.length), KVal = new Float64Array(BALLS.length);
-const KPellets = new Float64Array(BALLS.length), KTwin = new Float64Array(BALLS.length);
+const KPellets = new Float64Array(BALLS.length), KTwin = new Float64Array(BALLS.length), KFlow = new Float64Array(BALLS.length);
 const KBonus = new Float64Array(BALLS.length), KReps = new Float64Array(BALLS.length);
 const KGrav = Float32Array.from(BALLS, b => b.grav), KBounce = Float32Array.from(BALLS, b => b.bounce);
 const KMaxVy = Float32Array.from(BALLS, b => b.maxVy), KR = Float32Array.from(BALLS, b => b.r);
@@ -387,12 +393,14 @@ function refreshKinds() {
   KPellets[1] = 4 + S.lv[1].perk;
   KBonus[2] = 1 + S.lv[2].perk * 0.25;
   KReps[3] = 1.5 + S.lv[3].perk * 0.25;
+  BALLS.forEach((b, i) => { KFlow[i] = KRate[i] * KPellets[i] * (1 + KTwin[i]); });
 }
 refreshKinds();
 
 /* ========================= Particles (structure of arrays) ========================= */
 const MAX = 80000;
-const PILE_MAX = 2400;
+const PILE_MAX = 600;   // balls with real collisions behind the dam
+const BODY_MAX = 560;  // the rest of the stock is counted, not simulated
 const px = new Float32Array(MAX), py = new Float32Array(MAX);
 const vx = new Float32Array(MAX), vy = new Float32Array(MAX);
 const rad = new Float32Array(MAX);
@@ -470,37 +478,144 @@ function layout() {
     const [type, m] = GATE_PLAN[f][s];
     const slot = SLOTS[s];
     const y = Math.round((f * floorH + floorH * slot.y) / ROW_GAP) * ROW_GAP;
-    gates.push({ type, m, x0: slot.x0, x1: slot.x1, y, bit: 1 << i, flash: old[i] ? old[i].flash : 0 });
+    // A lone first gate spans the board, so every early ball shows what it does.
+    const alone = S.gates === 1;
+    gates.push({ type, m, x0: alone ? 0.1 : slot.x0, x1: alone ? 0.9 : slot.x1, y, bit: 1 << i, flash: old[i] ? old[i].flash : 0 });
   }
-  buildPile();
+  gridRows = Math.ceil((RES + 0.1) / CELL) + 1;
+  gridHead = new Int16Array(GRID_COLS * gridRows);
   if (bgCtx) drawBg();
 }
 function gateMult(g) {
   return g.type === 'value' ? g.m * (1 + 0.5 * S.boost) : g.m;
 }
 
-/* The stored balls are drawn as a loose pile behind the dam. */
-const pileX = new Float32Array(PILE_MAX), pileY = new Float32Array(PILE_MAX);
-const pileMix = Float32Array.from({ length: PILE_MAX }, () => Math.random());
-let pileSlots = 0, pileR = 0.0085;
-function buildPile() {
-  const floorY = -DAM_T, top = -RES + 0.02, left = 0.025, right = 0.975;
-  const area = (right - left) * Math.max(0.02, floorY - top);
-  pileSlots = Math.max(60, Math.min(PILE_MAX, Math.round(damCap())));
-  const sp = Math.sqrt(area / pileSlots / 0.87);
-  pileR = Math.min(0.016, sp * 0.62);
-  let c = 0;
-  for (let j = 0; c < pileSlots; j++) {
-    const y = floorY - sp * 0.5 - j * sp * 0.87;
-    for (let x = left + sp * (j % 2 ? 1 : 0.5); x < right && c < pileSlots; x += sp) {
-      pileX[c] = x; pileY[c] = Math.max(top, y); c++;
+/* Balls behind the dam collide with each other and roll down a V floor to the gap. */
+const CELL = 0.026, GRID_COLS = 40, FLOOR_SLOPE = 0.06;
+const bx = new Float32Array(PILE_MAX), by = new Float32Array(PILE_MAX);
+const bpx = new Float32Array(PILE_MAX), bpy = new Float32Array(PILE_MAX);
+const bvx = new Float32Array(PILE_MAX), bvy = new Float32Array(PILE_MAX);
+const br = new Float32Array(PILE_MAX);
+const bk = new Uint8Array(PILE_MAX), bGhost = new Uint8Array(PILE_MAX);
+const gridNext = new Int16Array(PILE_MAX);
+let gridHead = new Int16Array(GRID_COLS * 20), gridRows = 20;
+let bn = 0, headless = false;
+const floorY = x => -DAM_T - FLOOR_SLOPE * Math.abs(x - 0.5);
+const SPAWN_X = [0.5, 0.36, 0.64, 0.78];
+
+function addBody(k, x, y, ux, uy, ghost) {
+  if (headless || bn >= PILE_MAX) return;
+  const i = bn++;
+  bx[i] = x; by[i] = y; bvx[i] = ux; bvy[i] = uy; br[i] = BALLS[k].r; bk[i] = k; bGhost[i] = ghost;
+}
+function removeBody(i) {
+  const j = --bn;
+  if (i === j) return;
+  bx[i] = bx[j]; by[i] = by[j]; bvx[i] = bvx[j]; bvy[i] = bvy[j];
+  br[i] = br[j]; bk[i] = bk[j]; bGhost[i] = bGhost[j];
+}
+/* The ball nearest the gap is the one that gets pushed out. */
+function takeBody(k) {
+  let best = -1, bestD = Infinity, any = -1, anyD = Infinity;
+  for (let i = 0; i < bn; i++) {
+    if (bGhost[i]) continue;
+    const d = (bx[i] - 0.5) * (bx[i] - 0.5) + by[i] * by[i];
+    if (d < anyD) { anyD = d; any = i; }
+    if (bk[i] === k && d < bestD) { bestD = d; best = i; }
+  }
+  const i = best >= 0 ? best : any;
+  if (i >= 0) removeBody(i);
+}
+function solveBodies() {
+  gridHead.fill(-1);
+  const maxRow = gridRows - 1, maxCol = GRID_COLS - 1, offset = RES + 0.08;
+  for (let i = 0; i < bn; i++) {
+    let c = (bx[i] / CELL) | 0, r = ((by[i] + offset) / CELL) | 0;
+    c = c < 0 ? 0 : c > maxCol ? maxCol : c;
+    r = r < 0 ? 0 : r > maxRow ? maxRow : r;
+    const cell = r * GRID_COLS + c;
+    gridNext[i] = gridHead[cell];
+    gridHead[cell] = i;
+  }
+  for (let i = 0; i < bn; i++) {
+    let c = (bx[i] / CELL) | 0, r = ((by[i] + offset) / CELL) | 0;
+    c = c < 0 ? 0 : c > maxCol ? maxCol : c;
+    r = r < 0 ? 0 : r > maxRow ? maxRow : r;
+    for (let ry = Math.max(0, r - 1); ry <= Math.min(maxRow, r + 1); ry++) {
+      for (let rx = Math.max(0, c - 1); rx <= Math.min(maxCol, c + 1); rx++) {
+        for (let j = gridHead[ry * GRID_COLS + rx]; j >= 0; j = gridNext[j]) {
+          if (j <= i) continue;
+          const dx = bx[j] - bx[i], dy = by[j] - by[i], sum = br[i] + br[j], d2 = dx * dx + dy * dy;
+          if (d2 >= sum * sum || d2 < 1e-10) continue;
+          const d = Math.sqrt(d2), push = (sum - d) * 0.5 / d;
+          bx[i] -= dx * push; by[i] -= dy * push;
+          bx[j] += dx * push; by[j] += dy * push;
+          if (bGhost[i]) bGhost[i] = 2;
+          if (bGhost[j]) bGhost[j] = 2;
+        }
+      }
     }
   }
+  const open = doorOpen > 0.3;
+  for (let i = 0; i < bn; i++) {
+    const r0 = br[i];
+    if (bx[i] < r0) bx[i] = r0; else if (bx[i] > 1 - r0) bx[i] = 1 - r0;
+    if (by[i] < -RES + r0) by[i] = -RES + r0;
+    if (open) continue;
+    const limit = floorY(bx[i]) - r0, depth = by[i] - limit;
+    if (depth > 0) {
+      by[i] = limit;
+      bx[i] += (bx[i] < 0.5 ? 1 : -1) * depth * FLOOR_SLOPE * 2;
+      if (bGhost[i]) bGhost[i] = 2;
+    }
+  }
+}
+function stepBodies(h) {
+  if (headless) return;
+  for (let i = 0; i < bn; i++) {
+    bpx[i] = bx[i]; bpy[i] = by[i];
+    bvy[i] += 1.7 * h;
+    bx[i] += bvx[i] * h; by[i] += bvy[i] * h;
+  }
+  solveBodies();
+  solveBodies();
+  for (let i = bn - 1; i >= 0; i--) {
+    if (bGhost[i] === 2) { removeBody(i); continue; }
+    bvx[i] = Math.max(-1.4, Math.min(1.4, (bx[i] - bpx[i]) / h * 0.985));
+    bvy[i] = Math.max(-1.4, Math.min(1.4, (by[i] - bpy[i]) / h * 0.985));
+    if (by[i] > 0.002) {
+      const k = bk[i], amount = bGhost[i] ? 0 : Math.min(1, S.store[k]);
+      if (amount > 0) { S.store[k] -= amount; release(k, amount); }
+      removeBody(i);
+    }
+  }
+  // Keep the simulated pile in step with the counted stock, for example after a reload.
+  const total = damTotal();
+  let real = 0;
+  for (let i = 0; i < bn; i++) if (!bGhost[i]) real++;
+  if (real > Math.ceil(total)) {
+    for (let i = bn - 1; i >= 0 && real > Math.ceil(total); i--) if (!bGhost[i]) { removeBody(i); real--; }
+  } else if (real < Math.min(BODY_MAX, Math.floor(total))) {
+    for (let c = 0; c < 3 && real < Math.min(BODY_MAX, Math.floor(total)); c++, real++) {
+      addBody(pickKind(), 0.15 + Math.random() * 0.7, -RES + 0.03, 0, 0.1, 0);
+    }
+  }
+}
+function pickKind() {
+  const total = damTotal();
+  let roll = Math.random() * total;
+  for (let k = 0; k < BALLS.length; k++) {
+    roll -= S.store[k];
+    if (roll <= 0 && S.store[k] > 0) return k;
+  }
+  return 0;
 }
 
 /* ========================= Simulation ========================= */
 const emitAcc = new Float64Array(BALLS.length);
-let holdTimer = 0, heldFill = 0;
+emitAcc[0] = 0.4;
+const pieKick = new Float64Array(BALLS.length);
+let holdTimer = 0, heldFill = 0, leakAcc = 0;
 let doorOpen = 0, doorTarget = 0, doorTimer = 0;
 let floodLive = 0, floodGain = 0, floodPeak = 0, floodActive = false, floodHits = 0;
 let exitGain = 0, exitBurst = 0, gateHits = 0;
@@ -508,16 +623,22 @@ let time = 0;
 const incomeWindow = [];
 
 function floodStart() {
-  const stored = damTotal(), f = damFill(), press = pressure(f);
-  const budget = Math.max(200, Math.floor(Math.min(stored, softCap * 0.5)));
-  const real = Math.min(budget, Math.ceil(stored));
-  const weight = stored / real;
-  const shown = Math.max(1, Math.floor(f * pileSlots));
+  const stored = damTotal(), press = pressure(damFill());
+  let real = 0;
+  for (let i = 0; i < bn; i++) if (!bGhost[i]) real++;
+  const budget = Math.max(real, Math.floor(Math.min(stored, softCap * 0.5)));
+  const weight = stored / Math.max(1, budget);
+  for (let i = 0; i < bn; i++) {
+    if (bGhost[i]) continue;
+    const k = bk[i];
+    spawn(bx[i], by[i], (Math.random() - 0.5) * 0.25, Math.random() * 0.2, KVal[k] * press, weight, br[i], 1, 0, k);
+  }
+  bn = 0;
+  const extras = budget - real;
   BALLS.forEach((b, k) => {
-    const count = Math.round(real * S.store[k] / stored);
+    const count = Math.round(extras * S.store[k] / stored);
     for (let i = 0; i < count; i++) {
-      const c = Math.floor(Math.random() * shown);
-      spawn(pileX[c] + (Math.random() - 0.5) * 0.01, pileY[c], (Math.random() - 0.5) * 0.25, Math.random() * 0.2, KVal[k] * press, weight, pileR, 1, 0, k);
+      spawn(0.03 + Math.random() * 0.94, -DAM_T - Math.random() * (RES - 0.08), (Math.random() - 0.5) * 0.25, Math.random() * 0.2, KVal[k] * press, weight, b.r, 1, 0, k);
     }
   });
   S.store.fill(0);
@@ -525,27 +646,46 @@ function floodStart() {
   floodGain = 0; floodPeak = 0; floodHits = 0;
 }
 
-/* Fast streams are drawn as a few balls that each stand for several. */
+/* A ball that gets past the dam joins the board. */
+function release(k, amount) {
+  spawn(0.5 + (Math.random() - 0.5) * 0.03, 0.002, (Math.random() - 0.5) * 0.14, 0.12, KVal[k], amount, BALLS[k].r, 0, 0, k);
+}
+
+/* A charge just completed: new balls drop into the reservoir. A full dam spills over. */
 function emit(k, due) {
-  const b = BALLS[k];
   const exact = due * KPellets[k] * (1 + KTwin[k]);
   const count = Math.max(1, Math.floor(exact + Math.random()));
-  const real = Math.min(count, 6), weight = count / real;
-  for (let i = 0; i < real; i++) {
-    spawn(0.5 + (Math.random() - 0.5) * b.spread, 0.002, (Math.random() - 0.5) * (0.12 + b.spread), 0.12, KVal[k], weight, b.r, 0, 0, k);
+  const stored = Math.min(count, Math.max(0, damCap() - damTotal()));
+  S.store[k] += stored;
+  if (count > stored) release(k, count - stored);
+  const crowded = bn >= BODY_MAX;
+  for (let i = 0, drawn = Math.min(4, count); i < drawn; i++) {
+    addBody(k, SPAWN_X[k] + (Math.random() - 0.5) * 0.03, -RES + 0.08, (Math.random() - 0.5) * 0.2, 0.05, crowded ? 1 : 0);
   }
 }
 
-const tapReady = new Float64Array(BALLS.length);
-function dropAt(x) {
-  const k = S.tab < PLANT_TAB && S.owned[S.tab] ? S.tab : 0;
-  if (time < tapReady[k]) return false;
-  tapReady[k] = time + BALLS[k].tapCd;
-  const count = Math.round(KPellets[k]);
-  for (let i = 0; i < count; i++) {
-    spawn(Math.min(0.98, Math.max(0.02, x + (Math.random() - 0.5) * 0.02 * (count - 1))), 0.004, (Math.random() - 0.5) * 0.1, 0.1, KVal[k], 1, BALLS[k].r, 0, 0, k);
+/* Pressure at work: the more balls are stored, the more of them escape. */
+function leak(h) {
+  const total = damTotal();
+  if (total <= 0) { leakAcc = 0; return; }
+  leakAcc += (TUNE.leakBase + leakK() * total) * h;
+  if (leakAcc < 1) return;
+  const due = Math.min(Math.floor(leakAcc), Math.ceil(total));
+  leakAcc -= due;
+  const parts = Math.min(due, 8), amount = due / parts;
+  for (let i = 0; i < parts; i++) {
+    const k = pickKind(), out = Math.min(S.store[k], amount);
+    if (out <= 0) continue;
+    S.store[k] -= out;
+    release(k, out);
+    if (bn > damTotal()) takeBody(k);
   }
-  return true;
+}
+
+function tapCharge() {
+  const k = S.tab < PLANT_TAB && S.owned[S.tab] ? S.tab : 0;
+  emitAcc[k] += BALLS[k].tapBoost;
+  pieKick[k] = 1;
 }
 
 function openDam() {
@@ -564,13 +704,7 @@ function tick(h) {
     holdTimer -= h;
     if (holdTimer <= 0) { holdTimer = 0; floodStart(); }
   } else {
-    const room = damCap() - damTotal();
-    if (room > 0) {
-      const add = fillRate() * h, scale = Math.min(1, room / add);
-      for (let k = 0; k < BALLS.length; k++) {
-        S.store[k] += fillOf(k) * h * scale;
-      }
-    }
+    leak(h);
   }
   doorOpen += (doorTarget - doorOpen) * Math.min(1, h * 16);
   if (doorTarget && !holdTimer) { doorTimer -= h; if (doorTimer <= 0) doorTarget = 0; }
@@ -583,6 +717,8 @@ function tick(h) {
       emit(k, due);
     }
   }
+
+  stepBodies(h);
 
   const lastFloor = S.floors - 1, gateCount = gates.length;
   const fzone = floorH * funnelStart, R2 = COLLIDE * COLLIDE;
@@ -882,24 +1018,37 @@ function drawBg() {
 function drawDam(c, f) {
   const W = view.W, top = view.resPx - DAM_T * W, h = DAM_T * W;
   const halfOpen = doorOpen * W * 0.5;
+  const gap = 0.028 * W, slopePx = FLOOR_SLOPE * W;
+  const fy = dist => top - slopePx * (dist / W);   // height of the sloped floor at a distance from the centre
   c.fillStyle = C.concrete;
-  c.fillRect(-2, top, W * 0.5 - halfOpen + 2, h);
-  c.fillRect(W * 0.5 + halfOpen, top, W * 0.5 - halfOpen + 2, h);
+  c.beginPath();
+  c.moveTo(-2 - halfOpen, top + h); c.lineTo(W / 2 - gap - halfOpen, top + h);
+  c.lineTo(W / 2 - gap - halfOpen, fy(gap)); c.lineTo(-2 - halfOpen, fy(W / 2));
+  c.closePath();
+  c.moveTo(W + 2 + halfOpen, top + h); c.lineTo(W / 2 + gap + halfOpen, top + h);
+  c.lineTo(W / 2 + gap + halfOpen, fy(gap)); c.lineTo(W + 2 + halfOpen, fy(W / 2));
+  c.closePath();
+  c.fill();
   c.fillStyle = C.concreteDark;
-  c.fillRect(-2, top + h - 3, W * 0.5 - halfOpen + 2, 3);
-  c.fillRect(W * 0.5 + halfOpen, top + h - 3, W * 0.5 - halfOpen + 2, 3);
-  if (doorOpen < 0.05) {
-    c.fillStyle = C.deep;
-    c.fillRect(W * 0.5 - W * 0.035, top, W * 0.07, h);
-  }
+  c.fillRect(-2 - halfOpen, top + h - 3, W / 2 - gap + 2, 3);
+  c.fillRect(W / 2 + gap + halfOpen, top + h - 3, W / 2 - gap + 2, 3);
+  // Marks how high the stock can reach; a higher dam moves it up.
+  const capHeight = Math.min(RES - 0.05, Math.min(damCap(), BODY_MAX) * 0.00028);
+  const capY = top - capHeight * W - 0.015 * W;
+  c.strokeStyle = C.hazard;
+  c.lineWidth = 1;
+  c.setLineDash([6, 5]);
+  c.beginPath(); c.moveTo(0, capY); c.lineTo(W - 24, capY); c.stroke();
+  c.setLineDash([]);
   if (f >= 0.9 && doorOpen < 0.05) {
+    const sy = top + h - 5;
     c.save();
-    c.beginPath(); c.rect(0, top, W, 5); c.clip();
+    c.beginPath(); c.rect(0, sy, W, 5); c.clip();
     c.fillStyle = C.hazard;
-    c.fillRect(0, top, W, 5);
+    c.fillRect(0, sy, W, 5);
     c.fillStyle = C.deep;
     for (let x = -10 + (time * 40) % 24; x < W; x += 24) {
-      c.beginPath(); c.moveTo(x, top); c.lineTo(x + 12, top); c.lineTo(x + 7, top + 5); c.lineTo(x - 5, top + 5); c.fill();
+      c.beginPath(); c.moveTo(x, sy); c.lineTo(x + 12, sy); c.lineTo(x + 7, sy + 5); c.lineTo(x - 5, sy + 5); c.fill();
     }
     c.restore();
   }
@@ -918,19 +1067,39 @@ function drawDam(c, f) {
   const ly = gBot - (gBot - gTop) * f;
   c.fillStyle = f >= 0.99 ? C.value : C.hazard;
   c.beginPath(); c.moveTo(gx + 12, ly - 5); c.lineTo(gx + 12, ly + 5); c.lineTo(gx + 5, ly); c.fill();
-  if (f > 0.04) {
-    c.globalAlpha = 0.85;
-    c.fillStyle = C.deep;
-    c.fillRect(0, 0, 74, 44);
-    c.globalAlpha = 1;
-    c.textAlign = 'left';
-    c.font = `16px ${fontDisplay}`;
-    c.fillStyle = C.ink;
-    c.fillText(`×${fmtMult(pressure(f))}`, 9, 21);
-    c.font = `600 11px ${fontBody}`;
-    c.fillStyle = C.muted;
-    c.fillText('PRESSIONE', 9, 35);
-  }
+  c.globalAlpha = 0.85;
+  c.fillStyle = C.deep;
+  c.fillRect(0, 0, 92, 54);
+  c.globalAlpha = 1;
+  c.textAlign = 'left';
+  c.font = `18px ${fontDisplay}`;
+  c.fillStyle = C.ink;
+  c.fillText(`${Math.round(f * 100)}%`, 9, 22);
+  c.font = `600 11px ${fontBody}`;
+  c.fillStyle = C.muted;
+  c.fillText('PRESSIONE', 9, 35);
+  c.fillText(`fuga ${fmtEvery(leakRate())}`, 9, 48);
+}
+
+/* Each ball type charges on its own pie, then pops out over the reservoir. */
+function drawSpawners(c, dt) {
+  BALLS.forEach((b, k) => {
+    if (!S.owned[k]) return;
+    const x = WX(SPAWN_X[k]), y = view.resPx + (-RES + 0.05) * view.W, R = 11 + 4 * pieKick[k];
+    pieKick[k] = Math.max(0, pieKick[k] - dt * 6);
+    c.fillStyle = C.panel;
+    c.beginPath(); c.arc(x, y, R, 0, 6.2832); c.fill();
+    const fast = KRate[k] >= 6, share = fast ? 1 : emitAcc[k] % 1;
+    c.fillStyle = b.hex;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.arc(x, y, R, -1.5708, -1.5708 + 6.2832 * share);
+    c.closePath();
+    c.fill();
+    c.strokeStyle = b.hex;
+    c.lineWidth = 2;
+    c.beginPath(); c.arc(x, y, R, 0, 6.2832); c.stroke();
+  });
 }
 
 function drawGates(c) {
@@ -978,23 +1147,17 @@ function drawFloaters(c, dt) {
 
 function draw(dt) {
   const f = holdTimer > 0 ? heldFill : damFill();
-  const shownPile = Math.floor(f * pileSlots);
-  const jitter = holdTimer > 0 ? 0.006 : 0.0016 * Math.pow(f, 3);
+  const jitter = holdTimer > 0 ? 0.005 : 0.0012 * f * f * f;
   let w = 0;
   for (let i = 0; i < n; i++, w += 4) {
     glF[w] = px[i]; glF[w + 1] = py[i]; glF[w + 2] = rad[i]; glU[w + 3] = col[i];
   }
-  const stored = damTotal() || 1;
-  const cum = [];
-  S.store.reduce((a, b, k) => (cum[k] = (a + b) / stored, a + b), 0);
-  for (let i = 0; i < shownPile; i++, w += 4) {
-    let pk = 0;
-    while (pk < cum.length - 1 && pileMix[i] > cum[pk]) pk++;
-    const wob = jitter ? Math.sin(time * 31 + i * 1.7) * jitter : 0;
-    glF[w] = pileX[i] + wob; glF[w + 1] = pileY[i] + (jitter ? Math.cos(time * 27 + i) * jitter : 0);
-    glF[w + 2] = pileR; glU[w + 3] = COLS[pk][0];
+  for (let i = 0; i < bn; i++, w += 4) {
+    glF[w] = bx[i] + (jitter ? Math.sin(time * 31 + i * 1.7) * jitter : 0);
+    glF[w + 1] = by[i] + (jitter ? Math.cos(time * 27 + i) * jitter : 0);
+    glF[w + 2] = br[i]; glU[w + 3] = COLS[bk[i]][0];
   }
-  const total = n + shownPile;
+  const total = n + bn;
   if (gl) {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(uRes, view.W, view.H);
@@ -1010,9 +1173,11 @@ function draw(dt) {
   if (!gl) {
     c.fillStyle = C.ball;
     for (let i = 0; i < n; i++) c.fillRect(WX(px[i]) - 2, WY(py[i]) - 2, 4, 4);
+    for (let i = 0; i < bn; i++) c.fillRect(WX(bx[i]) - 3, WY(by[i]) - 3, 6, 6);
   }
   drawGates(c);
   drawDam(c, f);
+  drawSpawners(c, dt);
   drawFloaters(c, dt);
   for (const G of gates) G.flash = Math.max(0, G.flash - dt * 4);
   if (flash > 0) {
@@ -1046,13 +1211,11 @@ const fmtMult = v => nf1.format(v);
 
 const costAt = ([base, grow], lv) => base * Math.pow(grow, lv);
 const fmtRate = v => nf2.format(v);
-function fmtTime(sec) {
-  if (!isFinite(sec)) return '--';
-  const t = Math.ceil(sec);
-  if (t >= 3600) return `${Math.floor(t / 3600)} h ${Math.floor(t / 60) % 60} min`;
-  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+/* Slow rates read better as a period: "ogni 10 s" instead of "0,1 al secondo". */
+function fmtEvery(rate) {
+  if (rate <= 0) return 'nessuna';
+  return rate < 1 ? `1 ogni ${nf1.format(1 / rate)} s` : `${fmtRate(rate)} al s`;
 }
-
 function ballItems(i) {
   const b = BALLS[i], L = S.lv[i];
   if (!S.owned[i]) {
@@ -1066,18 +1229,13 @@ function ballItems(i) {
   return [
     {
       id: `${i}.rate`, name: 'Frequenza', cost: costAt(b.costs.rate, L.rate), can: true,
-      effect: `${fmtRate(rateOf(i))} → ${fmtRate(rateOf(i) * TUNE.rateGrow)} al secondo`,
+      effect: `${fmtEvery(rateOf(i))} → ${fmtEvery(rateAt(i, L.rate + 1))}`,
       apply: () => { L.rate++; },
     },
     {
       id: `${i}.value`, name: 'Valore', cost: costAt(b.costs.value, L.value), can: true,
-      effect: `${fmtRate(valueOf(i))} → ${fmtRate(valueOf(i) * TUNE.valueGrow)} monete`,
+      effect: `${fmtRate(valueOf(i))} → ${fmtRate(valueAt(i, L.value + 1))} monete`,
       apply: () => { L.value++; },
-    },
-    {
-      id: `${i}.store`, name: 'Riserva', cost: costAt(b.costs.store, L.store), can: true,
-      effect: `diga +${fmtRate(fillOf(i))} → +${fmtRate(fillOf(i) * TUNE.storeGrow)} al secondo`,
-      apply: () => { L.store++; },
     },
     {
       id: `${i}.perk`, name: b.perkName, cost: costAt(b.costs.perk, L.perk), can: !perkMaxed,
@@ -1087,21 +1245,31 @@ function ballItems(i) {
   ];
 }
 
-function plantItems() {
-  const allGates = S.gates >= MAX_FLOORS * 3;
-  const nextGate = allGates ? null : GATE_PLAN[Math.floor(S.gates / 3)][S.gates % 3];
-  const floorCost = TUNE.costFloor[S.floors - 1];
+function damItems() {
+  const leakNow = leakK() * 100;
   return [
     {
-      id: 'dam', name: 'Diga più alta', cost: costAt(TUNE.costDam, S.damLv), can: true,
-      effect: `capienza ${fmt(damCap())} → ${fmt(damCap() * TUNE.capGrow)}`,
-      apply: () => { S.damLv++; buildPile(); },
+      id: 'dam', name: 'Capienza', cost: costAt(TUNE.costCap, S.damLv), can: true,
+      effect: `${fmt(damCap())} → ${fmt(damCap() * TUNE.capGrow)} palline`,
+      apply: () => { S.damLv++; },
     },
     {
-      id: 'press', name: 'Paratoie', cost: costAt(TUNE.costPress, S.pressLv), can: true,
-      effect: `pressione ×${fmtMult(1 + pressureMax())} → ×${fmtMult(1 + pressureMax() + TUNE.pressureStep)}`,
-      apply: () => { S.pressLv++; },
+      id: 'seal', name: 'Tenuta', cost: costAt(TUNE.costSeal, S.sealLv), can: true,
+      effect: `fuga ${fmtRate(leakNow)}% → ${fmtRate(leakNow * TUNE.sealGrow)}% al s`,
+      apply: () => { S.sealLv++; },
     },
+    {
+      id: 'bonus', name: 'Paratoie', cost: costAt(TUNE.costBonus, S.bonusLv), can: true,
+      effect: `valanga piena ×${fmtMult(1 + bonusMax())} → ×${fmtMult(1 + bonusMax() + TUNE.bonusStep)}`,
+      apply: () => { S.bonusLv++; },
+    },
+  ];
+}
+
+function towerItems() {
+  const allGates = S.gates >= MAX_FLOORS * 3;
+  const nextGate = allGates ? null : GATE_PLAN[Math.floor(S.gates / 3)][S.gates % 3];
+  return [
     {
       id: 'gate',
       name: allGates ? 'Potenzia valore' : 'Nuova barriera',
@@ -1114,14 +1282,14 @@ function plantItems() {
     },
     {
       id: 'floor', name: S.floors < MAX_FLOORS ? `Piano ${S.floors + 1}` : 'Torre completa',
-      cost: floorCost, can: S.floors < MAX_FLOORS,
+      cost: TUNE.costFloor[S.floors - 1], can: S.floors < MAX_FLOORS,
       effect: S.floors < MAX_FLOORS ? 'la cascata si allunga' : `${MAX_FLOORS} piani costruiti`,
       apply: () => { S.floors++; layout(); },
     },
   ];
 }
-const tabItems = t => (t === PLANT_TAB ? plantItems() : ballItems(t));
-const allItems = () => [...BALLS.flatMap((b, i) => ballItems(i)), ...plantItems()];
+const tabItems = t => (t === DAM_TAB ? damItems() : t === TOWER_TAB ? towerItems() : ballItems(t));
+const allItems = () => [...BALLS.flatMap((b, i) => ballItems(i)), ...damItems(), ...towerItems()];
 
 function buyItem(item) {
   if (!item.can || S.coins < item.cost) return false;
@@ -1137,10 +1305,10 @@ function buy(id) {
 }
 
 const tabsEl = $('tabs');
-const tabEls = [...BALLS.map((b, i) => [b.name, b.hex, i]), ['Impianto', C.concrete, PLANT_TAB]].map(([label, hex, i]) => {
+const tabEls = [...BALLS.map((b, i) => [b.name, b.hex, i]), ['Diga', C.hazard, DAM_TAB], ['Torre', C.concrete, TOWER_TAB]].map(([label, hex, i]) => {
   const el = document.createElement('button');
   el.type = 'button';
-  el.className = i === PLANT_TAB ? 'tab plant' : 'tab';
+  el.className = i >= PLANT_TAB ? 'tab plant' : 'tab';
   el.id = `tab-${i}`;
   el.setAttribute('role', 'tab');
   el.style.setProperty('--dot', hex);
@@ -1178,11 +1346,9 @@ function refreshUI() {
   damBtn.classList.toggle('full', ready && f >= 0.999);
   damBtn.style.setProperty('--fill', `${(f * 100).toFixed(1)}%`);
   setText(damMain, busy ? 'VALANGA!' : f >= 0.999 ? 'DIGA PIENA: APRI!' : 'APRI LA DIGA');
-  const toFull = fillRate() > 0 ? (damCap() - damTotal()) / fillRate() : Infinity;
-  const eta = f >= 0.999 ? '' : ` · piena tra ${fmtTime(toFull)}`;
   setText(damSub, busy ? `${fmt(floodGain)} monete finora`
-    : ready ? `${fmt(damTotal())} palline · ×${fmtMult(pressure(f))}${eta}`
-    : `Si riempie… ${Math.floor(f * 100)}%${eta}`);
+    : ready ? `${fmt(damTotal())} palline · valore ×${fmtMult(pressure(f))}`
+    : `Serve il ${Math.round(TUNE.minOpen * 100)}% di pressione: ora ${Math.round(f * 100)}%`);
 
   tabEls.forEach((el, i) => {
     el.setAttribute('aria-selected', String(S.tab === i));
@@ -1199,6 +1365,7 @@ function refreshUI() {
     slot.el.disabled = !afford;
     slot.el.classList.toggle('buy', afford);
     slot.el.classList.toggle('wide', !!item.wide);
+    slot.el.classList.toggle('span', items.length === 2 || (items.length % 2 === 1 && i === items.length - 1 && !item.wide));
     setText(slot.name, item.name);
     setText(slot.cost, item.can && isFinite(item.cost) ? fmt(item.cost) : '');
     setText(slot.effect, item.effect);
@@ -1229,13 +1396,10 @@ function tryOpen() {
 }
 damBtn.addEventListener('click', tryOpen);
 fxCanvas.addEventListener('pointerdown', e => {
-  const r = fxCanvas.getBoundingClientRect();
   audio.init();
-  if (e.clientY - r.top < view.resPx) return;
-  if (dropAt((e.clientX - r.left) / view.W)) {
-    S.tapped = true;
-    audio.blip(2);
-  }
+  tapCharge();
+  S.tapped = true;
+  audio.blip(2);
 });
 $('mute-btn').addEventListener('click', e => {
   audio.init();
@@ -1244,8 +1408,9 @@ $('mute-btn').addEventListener('click', e => {
 });
 function hardReset() {
   Object.assign(S, freshState());
-  n = 0; liveLogical = 0; floodLive = 0; floodActive = false; holdTimer = 0;
+  n = 0; bn = 0; liveLogical = 0; floodLive = 0; floodActive = false; holdTimer = 0; leakAcc = 0;
   emitAcc.fill(0);
+  emitAcc[0] = 0.4;
   floaters.length = 0; incomeWindow.length = 0;
   exitGain = 0; exitBurst = 0; floaterGain = 0; lastFlood = null;
   refreshKinds();
@@ -1326,11 +1491,12 @@ function frame(t) {
 function welcomeBack() {
   const away = (Date.now() - (S.savedAt || Date.now())) / 1000;
   if (away < 30) return;
-  const before = damTotal();
-  const rate = fillRate();
-  const add = Math.min(damCap() - before, rate * away);
-  if (add <= 1) return;
-  BALLS.forEach((b, k) => { S.store[k] += add * fillOf(k) / rate; });
+  // Stock approaches the level where leaks balance the incoming balls.
+  const flow = KFlow.reduce((a, b) => a + b, 0), k = leakK(), before = damTotal();
+  const balance = Math.max(0, (flow - TUNE.leakBase) / k);
+  const after = Math.min(damCap(), balance + (before - balance) * Math.exp(-k * away));
+  if (after <= before + 1) return;
+  BALLS.forEach((b, i) => { S.store[i] += (after - before) * KFlow[i] / flow; });
   floaters.push({ x: view.W / 2, y: view.resPx + 70, txt: 'La diga è salita mentre eri via', size: 15, t: -1.2 });
 }
 
@@ -1348,7 +1514,9 @@ requestAnimationFrame(frame);
 
 /* Hooks for automated pacing and stress tests. */
 window.__valanga = {
-  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, fillRate, layout, hardReset, welcomeBack, dropAt, refreshKinds,
+  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, leakRate, layout, hardReset, welcomeBack, tapCharge, refreshKinds,
+  set headless(v) { headless = v; if (v) bn = 0; },
+  get bodies() { return bn; },
   set softCap(v) { softCap = v; },
   get stats() { return { n, softCap, liveLogical, fps, floodActive, floodGain, floodPeak, webgl: !!gl }; },
 };
