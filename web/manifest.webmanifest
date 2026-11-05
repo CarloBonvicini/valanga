@@ -1,0 +1,16 @@
+{
+  "name": "Valanga",
+  "short_name": "Valanga",
+  "description": "Accumula le palline dietro la diga e scatena la valanga.",
+  "lang": "it",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d2229",
+  "theme_color": "#0d2229",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

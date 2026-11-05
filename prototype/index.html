@@ -1,0 +1,1355 @@
+<title>Valanga</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: a single phone-shaped column. Gauges on top, the dam and tower in the middle, controls under the thumb.
+   Look: a hydroelectric plant at night. One deliberate dark world, so no light theme. */
+:root {
+  --ground: #0d2229;
+  --ground-deep: #081820;
+  --panel: #15333d;
+  --panel-line: #2a525e;
+  --concrete: #b8b1a2;
+  --concrete-dark: #7f7a6f;
+  --ink: #eef3ee;
+  --muted: #92aeb2;
+  --ball: #ffc23d;
+  --split: #53e6bd;
+  --value: #ff7a9c;
+  --hazard: #f5b81f;
+  --font-display: "Bowlby One", "Arial Black", Impact, sans-serif;
+  --font-body: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--ground-deep);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-weight: 600;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(100%, 56dvh);
+  height: 100%;
+  margin-inline: auto;
+  background: var(--ground);
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+#hud {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 10px 8px;
+  padding-inline: 16px;
+}
+.readout { display: grid; gap: 1px; min-width: 0; }
+.readout .label {
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#coins { font-family: var(--font-display); font-size: 30px; line-height: 1.05; color: var(--ball); font-variant-numeric: tabular-nums; }
+#income { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hud-side { display: grid; justify-items: end; gap: 4px; }
+#live { font-family: var(--font-display); font-size: 18px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tools { display: flex; gap: 6px; }
+.tool {
+  appearance: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.tool:focus-visible, #dam-btn:focus-visible, .shop-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+#field { position: relative; min-height: 0; }
+#field canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#stats {
+  position: absolute;
+  left: 82px;
+  top: 4px;
+  padding-inline: 5px;
+  background: var(--ground-deep);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+#result {
+  position: absolute;
+  inset-inline: 16px;
+  top: 34%;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding-block: 14px;
+  background: color-mix(in srgb, var(--ground-deep) 82%, transparent);
+  border-block: 3px solid var(--hazard);
+  pointer-events: none;
+  animation: slam .32s cubic-bezier(.2, 1.5, .4, 1);
+}
+#result .big { font-family: var(--font-display); font-size: 40px; line-height: 1.1; color: var(--ball); text-align: center; overflow-wrap: anywhere; }
+#result .small { font-size: 15px; color: var(--ink); text-align: center; }
+#result .record { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--split); }
+@keyframes slam { from { transform: scale(1.5); opacity: 0; } to { transform: none; opacity: 1; } }
+
+#controls {
+  display: grid;
+  gap: 8px;
+  padding-block: 8px 12px;
+  padding-inline: 16px;
+  background: var(--panel);
+  border-top: 2px solid var(--panel-line);
+}
+#dam-btn {
+  --fill: 0%;
+  position: relative;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  padding-block: 9px 7px;
+  background: linear-gradient(90deg, var(--hazard) var(--fill), var(--ground) var(--fill));
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+#dam-btn .main { display: block; font-family: var(--font-display); font-size: 22px; line-height: 1.1; color: inherit; }
+#dam-btn .sub { display: block; font-size: 13px; font-variant-numeric: tabular-nums; }
+#dam-btn.ready { color: var(--ground-deep); background: var(--hazard); }
+#dam-btn.full { animation: throb .7s ease-in-out infinite alternate; }
+#dam-btn:disabled { cursor: default; }
+@keyframes throb { from { transform: scale(1); } to { transform: scale(1.025); filter: brightness(1.15); } }
+
+#tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.tab {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 1px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--ground); border-color: var(--panel-line); color: var(--ink); }
+.tab:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tab .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--dot); }
+.tab.plant .dot { border-radius: 2px; }
+.tab.locked { opacity: .55; }
+.tab.locked .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--dot); }
+.tab.alert::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ball);
+}
+#shop { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; min-height: 116px; }
+#hint {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 14px;
+  font-size: 14px;
+  color: var(--ink);
+  text-align: center;
+  pointer-events: none;
+}
+.shop-btn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  appearance: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: var(--ground);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.shop-btn.wide { grid-column: 1 / -1; grid-row: span 2; align-content: center; }
+.shop-btn .effect { line-height: 1.2; }
+.shop-btn.wide .effect { white-space: normal; }
+.shop-btn .name { font-size: 15px; font-weight: 700; }
+.shop-btn .cost { font-size: 15px; font-weight: 700; color: var(--ball); font-variant-numeric: tabular-nums; }
+.shop-btn .effect { grid-column: 1 / -1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shop-btn:disabled { cursor: default; opacity: .5; }
+.shop-btn:not(:disabled):active { transform: translateY(1px); }
+.shop-btn.buy { border-color: var(--ball); }
+
+#rotate { display: none; }
+@media (orientation: landscape) and (max-height: 520px) {
+  #rotate {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+    background: var(--ground-deep);
+    color: var(--ink);
+    font-size: 18px;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dam-btn.full { animation: none; }
+  #result { animation: none; }
+}
+</style>
+
+<div id="rotate">Gira il telefono in verticale per giocare.</div>
+<div id="stage">
+  <header id="hud">
+    <div class="readout">
+      <span class="label">Monete</span>
+      <span id="coins">0</span>
+      <span id="income">0 al secondo</span>
+    </div>
+    <div class="hud-side">
+      <div class="readout" style="justify-items:end">
+        <span class="label">Palline in gioco</span>
+        <span id="live">0</span>
+      </div>
+      <div class="tools">
+        <button class="tool" id="mute-btn" type="button">Audio sì</button>
+        <button class="tool" id="reset-btn" type="button">Ricomincia</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="field">
+    <canvas id="bg"></canvas>
+    <canvas id="gl"></canvas>
+    <canvas id="fx"></canvas>
+    <div id="stats"></div>
+    <div id="result" hidden></div>
+    <div id="hint" hidden>Tocca il tabellone per lanciare una pallina</div>
+  </main>
+
+  <section id="controls">
+    <button id="dam-btn" type="button">
+      <span class="main">APRI LA DIGA</span>
+      <span class="sub">0%</span>
+    </button>
+    <div id="tabs" role="tablist" aria-label="Palline e impianto"></div>
+    <div id="shop">
+      <button class="shop-btn" id="slot-0" type="button"></button>
+      <button class="shop-btn" id="slot-1" type="button"></button>
+      <button class="shop-btn" id="slot-2" type="button"></button>
+      <button class="shop-btn" id="slot-3" type="button"></button>
+    </div>
+  </section>
+</div>
+
+<script>
+'use strict';
+/* ========================= Tuning ========================= */
+const TUNE = {
+  capBase: 900, capGrow: 1.45,
+  startFill: 0.25,
+  rateGrow: 1.13, valueGrow: 1.3, storeGrow: 1.1,
+  pressureBase: 1.5, pressureStep: 0.5,   // value = 1 + pressure * fill^3
+  minOpen: 0.2,
+  costDam: [800, 3.6],
+  costGate: [400, 3.6],
+  costBoost: [2e9, 6],
+  costFloor: [40000, 5e6],
+  costPress: [5000, 5],
+};
+/* Each ball type feeds the dam on its own: stored balls per second = base rate * store.
+   Frequenza only raises the coin stream, so the dam speeds up through Riserva alone. */
+const BALLS = [
+  {
+    id: 'biglia', name: 'Biglia', hex: '#ffc23d', r: 0.0085, rate: 1, value: 1, store: 4,
+    grav: 1.5, bounce: 0.45, maxVy: 0.95, spread: 0.05, tapCd: 0.15, unlock: 0,
+    costs: { rate: [12, 2.4], value: [20, 2.6], store: [60, 2.6], perk: [150, 2.8] },
+    perkName: 'Gemelle', perkMax: 10,
+    perkText: l => `${l * 10}% → ${(l + 1) * 10}% di doppie`,
+  },
+  {
+    id: 'grandine', name: 'Grandine', hex: '#8fe8ff', r: 0.0055, rate: 0.6, value: 0.4, store: 6,
+    grav: 1.2, bounce: 0.55, maxVy: 0.8, spread: 0.3, tapCd: 0.15, unlock: 1200,
+    costs: { rate: [400, 2.4], value: [600, 2.6], store: [800, 2.6], perk: [3000, 3.2] },
+    perkName: 'Raffica', perkMax: 12,
+    perkText: l => `${4 + l} → ${5 + l} chicchi a colpo`,
+    blurb: 'Piccola e leggera: arriva a raffiche e riempie bene la diga.',
+  },
+  {
+    id: 'piombo', name: 'Piombo', hex: '#a9b8d6', r: 0.0125, rate: 0.25, value: 10, store: 4,
+    grav: 2.2, bounce: 0.12, maxVy: 1.25, spread: 0.08, tapCd: 1.5, unlock: 30000,
+    costs: { rate: [9000, 2.5], value: [15000, 2.7], store: [20000, 2.7], perk: [60000, 3.5] },
+    perkName: 'Zavorra', perkMax: 8,
+    perkText: l => `+${l * 25}% → +${(l + 1) * 25}% a barriera`,
+    blurb: 'Pesante e rara: cade veloce, rimbalza poco e vale molto.',
+  },
+  {
+    id: 'cometa', name: 'Cometa', hex: '#c66bff', r: 0.011, rate: 0.08, value: 60, store: 5,
+    grav: 1.5, bounce: 0.6, maxVy: 1.05, spread: 0.2, tapCd: 6, unlock: 2e6,
+    costs: { rate: [6e5, 2.6], value: [1e6, 2.8], store: [1.5e6, 2.8], perk: [2e7, 30] },
+    perkName: 'Scia', perkMax: 2,
+    perkText: l => `barriere valore ^${fmtMult(1.5 + l * 0.25)} → ^${fmtMult(1.75 + l * 0.25)}`,
+    blurb: 'Rarissima: le barriere valore la moltiplicano molto di più.',
+  },
+];
+const PLANT_TAB = BALLS.length;
+const MAX_FLOORS = 3;
+const GATE_PLAN = [
+  [['split', 2], ['value', 2], ['split', 2]],
+  [['split', 3], ['value', 3], ['split', 3]],
+  [['split', 4], ['value', 5], ['split', 4]],
+];
+const SLOTS = [
+  { y: 0.3, x0: 0.06, x1: 0.5 },
+  { y: 0.3, x0: 0.5, x1: 0.94 },
+  { y: 0.6, x0: 0.2, x1: 0.8 },
+];
+
+/* ========================= State ========================= */
+const SAVE_KEY = 'valanga.v2';
+function freshState() {
+  return {
+    coins: 0, total: 0, damLv: 0, pressLv: 0, gates: 1, floors: 1, boost: 0, best: 0,
+    owned: BALLS.map((b, i) => i === 0),
+    lv: BALLS.map(() => ({ rate: 0, value: 0, store: 0, perk: 0 })),
+    store: BALLS.map((b, i) => (i === 0 ? TUNE.startFill * TUNE.capBase : 0)),
+    tab: 0, tapped: false, savedAt: Date.now(),
+  };
+}
+const S = freshState();
+try {
+  const raw = localStorage.getItem(SAVE_KEY);
+  if (raw) Object.assign(S, JSON.parse(raw));
+} catch (e) { /* storage may be blocked: the game still runs */ }
+function save() {
+  S.savedAt = Date.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* ignored */ }
+}
+
+const rateOf = i => BALLS[i].rate * Math.pow(TUNE.rateGrow, S.lv[i].rate);
+const valueOf = i => BALLS[i].value * Math.pow(TUNE.valueGrow, S.lv[i].value);
+const storeOf = i => BALLS[i].store * Math.pow(TUNE.storeGrow, S.lv[i].store);
+const damCap = () => TUNE.capBase * Math.pow(TUNE.capGrow, S.damLv);
+const damTotal = () => S.store.reduce((a, b) => a + b, 0);
+const damFill = () => Math.min(1, damTotal() / damCap());
+const fillOf = i => (S.owned[i] ? BALLS[i].rate * storeOf(i) : 0);
+const fillRate = () => BALLS.reduce((a, b, i) => a + fillOf(i), 0);
+const pressureMax = () => TUNE.pressureBase + TUNE.pressureStep * S.pressLv;
+const pressure = (f = damFill()) => 1 + pressureMax() * f * f * f;
+
+/* Per-kind values read by the simulation loop, refreshed after every purchase. */
+const KRate = new Float64Array(BALLS.length), KVal = new Float64Array(BALLS.length);
+const KPellets = new Float64Array(BALLS.length), KTwin = new Float64Array(BALLS.length);
+const KBonus = new Float64Array(BALLS.length), KReps = new Float64Array(BALLS.length);
+const KGrav = Float32Array.from(BALLS, b => b.grav), KBounce = Float32Array.from(BALLS, b => b.bounce);
+const KMaxVy = Float32Array.from(BALLS, b => b.maxVy), KR = Float32Array.from(BALLS, b => b.r);
+function refreshKinds() {
+  BALLS.forEach((b, i) => {
+    KRate[i] = S.owned[i] ? rateOf(i) : 0;
+    KVal[i] = valueOf(i);
+    KPellets[i] = 1; KTwin[i] = 0; KBonus[i] = 1; KReps[i] = 1;
+  });
+  KTwin[0] = S.lv[0].perk * 0.1;
+  KPellets[1] = 4 + S.lv[1].perk;
+  KBonus[2] = 1 + S.lv[2].perk * 0.25;
+  KReps[3] = 1.5 + S.lv[3].perk * 0.25;
+}
+refreshKinds();
+
+/* ========================= Particles (structure of arrays) ========================= */
+const MAX = 80000;
+const PILE_MAX = 2400;
+const px = new Float32Array(MAX), py = new Float32Array(MAX);
+const vx = new Float32Array(MAX), vy = new Float32Array(MAX);
+const rad = new Float32Array(MAX);
+const val = new Float64Array(MAX), wt = new Float64Array(MAX);
+const col = new Uint32Array(MAX), mask = new Uint32Array(MAX);
+const isFlood = new Uint8Array(MAX), kind = new Uint8Array(MAX);
+let n = 0;
+let softCap = 60000;
+let liveLogical = 0;
+
+const PEG_R = 0.011;
+const PEG_DX = 0.09;
+const ROW_GAP = 0.082;
+const COLLIDE = PEG_R + 0.006;
+const MAX_VX = 0.6;
+
+function rgb(hex) {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+function packRGB(hex, whiten) {
+  const [r, g, b] = rgb(hex).map(c => Math.round(c + (255 - c) * whiten));
+  return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+}
+/* A ball keeps its hue and turns paler as gates multiply its value. */
+const COLS = BALLS.map(b => [0, 0.15, 0.3, 0.45].map(m => packRGB(b.hex, m)));
+function ballColor(k, v) {
+  const t = Math.floor(Math.log(Math.max(1, v / KVal[k])) / Math.log(3));
+  return COLS[k][Math.min(3, t)];
+}
+
+function spawn(x, y, vxi, vyi, value, weight, r, flooded, m, k) {
+  if (n >= MAX) return -1;
+  const i = n++;
+  px[i] = x; py[i] = y; vx[i] = vxi; vy[i] = vyi;
+  val[i] = value; wt[i] = weight; rad[i] = r; kind[i] = k;
+  col[i] = ballColor(k, value); mask[i] = m; isFlood[i] = flooded;
+  liveLogical += weight;
+  if (flooded) floodLive++;
+  return i;
+}
+function removeAt(i) {
+  const j = --n;
+  if (i === j) return;
+  px[i] = px[j]; py[i] = py[j]; vx[i] = vx[j]; vy[i] = vy[j];
+  val[i] = val[j]; wt[i] = wt[j]; rad[i] = rad[j];
+  col[i] = col[j]; mask[i] = mask[j]; isFlood[i] = isFlood[j]; kind[i] = kind[j];
+}
+
+/* ========================= Board geometry ========================= */
+const view = { W: 390, H: 520, resPx: 100, dpr: 1 };
+let A = 1.1, RES = 0.26;     // board height and reservoir height, in widths
+const DAM_T = 0.032;         // dam wall thickness, in widths
+let floorH = A, rowCount = 0;
+let rowOn = new Uint8Array(0);
+let gates = [];
+const funnelStart = 0.8;
+const FUNNEL_GAPS = [[0.3, 0.7], [0.5], []];
+
+function layout() {
+  floorH = A / S.floors;
+  rowCount = Math.ceil(A / ROW_GAP);
+  rowOn = new Uint8Array(rowCount);
+  for (let k = 0; k < rowCount; k++) {
+    const y = (k + 0.5) * ROW_GAP;
+    const f = Math.min(S.floors - 1, Math.floor(y / floorH));
+    const local = y - f * floorH;
+    const inFunnel = f < S.floors - 1 && local > floorH * (funnelStart - 0.04);
+    rowOn[k] = (y > 0.03 && y < A - 0.05 && !inFunnel) ? 1 : 0;
+  }
+  const old = gates;
+  gates = [];
+  for (let i = 0; i < S.gates; i++) {
+    const f = Math.floor(i / 3), s = i % 3;
+    const [type, m] = GATE_PLAN[f][s];
+    const slot = SLOTS[s];
+    const y = Math.round((f * floorH + floorH * slot.y) / ROW_GAP) * ROW_GAP;
+    gates.push({ type, m, x0: slot.x0, x1: slot.x1, y, bit: 1 << i, flash: old[i] ? old[i].flash : 0 });
+  }
+  buildPile();
+  if (bgCtx) drawBg();
+}
+function gateMult(g) {
+  return g.type === 'value' ? g.m * (1 + 0.5 * S.boost) : g.m;
+}
+
+/* The stored balls are drawn as a loose pile behind the dam. */
+const pileX = new Float32Array(PILE_MAX), pileY = new Float32Array(PILE_MAX);
+const pileMix = Float32Array.from({ length: PILE_MAX }, () => Math.random());
+let pileSlots = 0, pileR = 0.0085;
+function buildPile() {
+  const floorY = -DAM_T, top = -RES + 0.02, left = 0.025, right = 0.975;
+  const area = (right - left) * Math.max(0.02, floorY - top);
+  pileSlots = Math.max(60, Math.min(PILE_MAX, Math.round(damCap())));
+  const sp = Math.sqrt(area / pileSlots / 0.87);
+  pileR = Math.min(0.016, sp * 0.62);
+  let c = 0;
+  for (let j = 0; c < pileSlots; j++) {
+    const y = floorY - sp * 0.5 - j * sp * 0.87;
+    for (let x = left + sp * (j % 2 ? 1 : 0.5); x < right && c < pileSlots; x += sp) {
+      pileX[c] = x; pileY[c] = Math.max(top, y); c++;
+    }
+  }
+}
+
+/* ========================= Simulation ========================= */
+const emitAcc = new Float64Array(BALLS.length);
+let holdTimer = 0, heldFill = 0;
+let doorOpen = 0, doorTarget = 0, doorTimer = 0;
+let floodLive = 0, floodGain = 0, floodPeak = 0, floodActive = false, floodHits = 0;
+let exitGain = 0, exitBurst = 0, gateHits = 0;
+let time = 0;
+const incomeWindow = [];
+
+function floodStart() {
+  const stored = damTotal(), f = damFill(), press = pressure(f);
+  const budget = Math.max(200, Math.floor(Math.min(stored, softCap * 0.5)));
+  const real = Math.min(budget, Math.ceil(stored));
+  const weight = stored / real;
+  const shown = Math.max(1, Math.floor(f * pileSlots));
+  BALLS.forEach((b, k) => {
+    const count = Math.round(real * S.store[k] / stored);
+    for (let i = 0; i < count; i++) {
+      const c = Math.floor(Math.random() * shown);
+      spawn(pileX[c] + (Math.random() - 0.5) * 0.01, pileY[c], (Math.random() - 0.5) * 0.25, Math.random() * 0.2, KVal[k] * press, weight, pileR, 1, 0, k);
+    }
+  });
+  S.store.fill(0);
+  floodActive = true;
+  floodGain = 0; floodPeak = 0; floodHits = 0;
+}
+
+/* Fast streams are drawn as a few balls that each stand for several. */
+function emit(k, due) {
+  const b = BALLS[k];
+  const exact = due * KPellets[k] * (1 + KTwin[k]);
+  const count = Math.max(1, Math.floor(exact + Math.random()));
+  const real = Math.min(count, 6), weight = count / real;
+  for (let i = 0; i < real; i++) {
+    spawn(0.5 + (Math.random() - 0.5) * b.spread, 0.002, (Math.random() - 0.5) * (0.12 + b.spread), 0.12, KVal[k], weight, b.r, 0, 0, k);
+  }
+}
+
+const tapReady = new Float64Array(BALLS.length);
+function dropAt(x) {
+  const k = S.tab < PLANT_TAB && S.owned[S.tab] ? S.tab : 0;
+  if (time < tapReady[k]) return false;
+  tapReady[k] = time + BALLS[k].tapCd;
+  const count = Math.round(KPellets[k]);
+  for (let i = 0; i < count; i++) {
+    spawn(Math.min(0.98, Math.max(0.02, x + (Math.random() - 0.5) * 0.02 * (count - 1))), 0.004, (Math.random() - 0.5) * 0.1, 0.1, KVal[k], 1, BALLS[k].r, 0, 0, k);
+  }
+  return true;
+}
+
+function openDam() {
+  if (holdTimer > 0 || floodActive || damFill() < TUNE.minOpen) return false;
+  holdTimer = 0.2;
+  heldFill = damFill();
+  doorTarget = 1;
+  doorTimer = 1.8;
+  fxOpen(heldFill);
+  return true;
+}
+
+function tick(h) {
+  time += h;
+  if (holdTimer > 0) {
+    holdTimer -= h;
+    if (holdTimer <= 0) { holdTimer = 0; floodStart(); }
+  } else {
+    const room = damCap() - damTotal();
+    if (room > 0) {
+      const add = fillRate() * h, scale = Math.min(1, room / add);
+      for (let k = 0; k < BALLS.length; k++) {
+        S.store[k] += fillOf(k) * h * scale;
+      }
+    }
+  }
+  doorOpen += (doorTarget - doorOpen) * Math.min(1, h * 16);
+  if (doorTarget && !holdTimer) { doorTimer -= h; if (doorTimer <= 0) doorTarget = 0; }
+
+  for (let k = 0; k < BALLS.length; k++) {
+    emitAcc[k] += KRate[k] * h;
+    if (emitAcc[k] >= 1) {
+      const due = Math.floor(emitAcc[k]);
+      emitAcc[k] -= due;
+      emit(k, due);
+    }
+  }
+
+  const lastFloor = S.floors - 1, gateCount = gates.length;
+  const fzone = floorH * funnelStart, R2 = COLLIDE * COLLIDE;
+  for (let i = n - 1; i >= 0; i--) {
+    const oy = py[i];
+    let x = px[i], y = oy, ux = vx[i], uy = vy[i];
+    const K = kind[i], BOUNCE = KBounce[K];
+    uy += KGrav[K] * h;
+    if (uy > KMaxVy[K]) uy = KMaxVy[K];
+    if (rad[i] > KR[K]) rad[i] -= h * 0.012;
+
+    if (y > 0 && lastFloor > 0) {
+      const f = y >= floorH * lastFloor ? lastFloor : (y / floorH) | 0;
+      if (f < lastFloor) {
+        const local = y - f * floorH;
+        if (local > fzone) {
+          const t = (local - fzone) / (floorH - fzone);
+          const gaps = FUNNEL_GAPS[f];
+          const gx = gaps.length === 1 ? gaps[0] : (x < 0.5 ? gaps[0] : gaps[1]);
+          ux = ux * (1 - 6 * h) + (gx - x) * (10 + 40 * t) * h;
+        }
+      }
+    }
+    x += ux * h;
+    y += uy * h;
+    if (x < 0.012) { x = 0.012; ux = Math.abs(ux) * BOUNCE; }
+    else if (x > 0.988) { x = 0.988; ux = -Math.abs(ux) * BOUNCE; }
+    if (ux > MAX_VX) ux = MAX_VX; else if (ux < -MAX_VX) ux = -MAX_VX;
+
+    if (y > 0) {
+      const k = (y / ROW_GAP - 0.5 + 0.5) | 0;
+      if (k < rowCount && rowOn[k]) {
+        const dy = y - (k + 0.5) * ROW_GAP;
+        if (dy < COLLIDE && dy > -COLLIDE) {
+          const off = (k & 1) ? PEG_DX * 0.5 : 0;
+          const cx = Math.round((x - off) / PEG_DX) * PEG_DX + off;
+          const dx = x - cx, d2 = dx * dx + dy * dy;
+          if (d2 < R2 && d2 > 1e-9) {
+            const d = Math.sqrt(d2), nx = dx / d, ny = dy / d;
+            x = cx + nx * COLLIDE;
+            y = (k + 0.5) * ROW_GAP + ny * COLLIDE;
+            const vn = ux * nx + uy * ny;
+            if (vn < 0) {
+              ux -= (1 + BOUNCE) * vn * nx;
+              uy -= (1 + BOUNCE) * vn * ny;
+              ux += (Math.random() - 0.5) * 0.1;
+            }
+          }
+        }
+      }
+    }
+
+    for (let g = 0; g < gateCount; g++) {
+      const G = gates[g];
+      if (oy < G.y && y >= G.y && x >= G.x0 && x <= G.x1 && !(mask[i] & G.bit)) {
+        mask[i] |= G.bit;
+        G.flash = 1;
+        gateHits++;
+        if (isFlood[i]) floodHits++;
+        const reps = KReps[K];
+        if (G.type === 'value') {
+          val[i] *= Math.pow(gateMult(G), reps);
+        } else {
+          const extra = G.m - 1;
+          const room = Math.min(extra, Math.max(0, softCap - n));
+          for (let c = 0; c < room; c++) {
+            spawn(x + (Math.random() - 0.5) * 0.012, y + 0.001, ux + (Math.random() - 0.5) * 0.45, uy * (0.5 + Math.random() * 0.5), val[i], wt[i], rad[i], isFlood[i], mask[i], K);
+          }
+          if (room < extra) {
+            const gain = (extra - room) * wt[i];
+            wt[i] += gain;
+            liveLogical += gain;
+          }
+        }
+        if (KBonus[K] !== 1) val[i] *= KBonus[K];
+        col[i] = ballColor(K, val[i]);
+      }
+    }
+
+    if (y > A) {
+      const gain = val[i] * wt[i];
+      S.coins += gain;
+      S.total += gain;
+      exitGain += gain;
+      exitBurst++;
+      liveLogical -= wt[i];
+      if (isFlood[i]) { floodGain += gain; floodLive--; }
+      removeAt(i);
+      continue;
+    }
+    px[i] = x; py[i] = y; vx[i] = ux; vy[i] = uy;
+  }
+  if (n === 0) liveLogical = 0;
+  if (floodActive) {
+    if (liveLogical > floodPeak) floodPeak = liveLogical;
+    if (floodLive <= 0) { floodActive = false; floodLive = 0; fxEnd(); }
+  }
+}
+
+/* ========================= Feedback hooks (no-ops until the view exists) ========================= */
+let shake = 0, flash = 0;
+const floaters = [];
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function fxOpen(f) {
+  shake = 6 + 18 * f * f;
+  flash = 0.5 + 0.5 * f;
+  audio.boom(f);
+  try { navigator.vibrate && navigator.vibrate(f > 0.8 ? [60, 30, 120] : 50); } catch (e) { /* unsupported */ }
+}
+function fxEnd() {
+  const record = floodGain > S.best;
+  if (record) S.best = floodGain;
+  lastFlood = { gain: floodGain, peak: floodPeak, record };
+  if (document.hidden || !running) return;
+  audio.chord();
+  showResult();
+  save();
+}
+let lastFlood = null;
+
+/* ========================= Audio ========================= */
+const audio = (() => {
+  let ac = null, out = null, rainGain = null, muted = false, lastBlip = 0;
+  const SCALE = [0, 2, 4, 7, 9];
+  function init() {
+    if (ac) return;
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      out = ac.createGain();
+      out.gain.value = muted ? 0 : 0.5;
+      out.connect(ac.destination);
+      const len = ac.sampleRate * 2, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      audio.noise = buf;
+      const src = ac.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const bp = ac.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 2800; bp.Q.value = 0.7;
+      rainGain = ac.createGain(); rainGain.gain.value = 0;
+      src.connect(bp).connect(rainGain).connect(out);
+      src.start();
+    } catch (e) { ac = null; }
+  }
+  function tone(freq, vol, dur, type = 'triangle', when = 0) {
+    if (!ac) return;
+    const t = ac.currentTime + when, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + dur);
+  }
+  return {
+    noise: null,
+    init,
+    setMuted(v) { muted = v; if (out) out.gain.value = v ? 0 : 0.5; },
+    get muted() { return muted; },
+    blip(step) {
+      if (!ac || ac.currentTime - lastBlip < 0.045) return;
+      lastBlip = ac.currentTime;
+      const note = SCALE[step % SCALE.length] + 12 * Math.floor(step / SCALE.length);
+      tone(330 * Math.pow(2, note / 12), 0.1, 0.11);
+    },
+    boom(f) {
+      if (!ac) return;
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(130, t);
+      o.frequency.exponentialRampToValueAtTime(34, t + 0.5);
+      g.gain.setValueAtTime(0.5 + 0.5 * f, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+      o.connect(g).connect(out); o.start(t); o.stop(t + 0.8);
+      const n2 = ac.createBufferSource(), lp = ac.createBiquadFilter(), g2 = ac.createGain();
+      n2.buffer = audio.noise;
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(5000, t);
+      lp.frequency.exponentialRampToValueAtTime(200, t + 0.7);
+      g2.gain.setValueAtTime(0.6, t);
+      g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+      n2.connect(lp).connect(g2).connect(out);
+      n2.start(t); n2.stop(t + 0.8);
+    },
+    chord() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, 0.7, 'triangle', i * 0.07)); },
+    click() { tone(880, 0.08, 0.06, 'square'); },
+    rain(level) { if (rainGain) rainGain.gain.setTargetAtTime(level, ac.currentTime, 0.08); },
+  };
+})();
+
+/* ========================= Rendering ========================= */
+const $ = id => document.getElementById(id);
+const field = $('field');
+const bgCanvas = $('bg'), glCanvas = $('gl'), fxCanvas = $('fx');
+const bgCtx = bgCanvas.getContext('2d'), fxCtx = fxCanvas.getContext('2d');
+const css = getComputedStyle(document.documentElement);
+const token = name => css.getPropertyValue(name).trim();
+const C = {
+  ground: token('--ground'), deep: token('--ground-deep'), panel: token('--panel'), line: token('--panel-line'),
+  concrete: token('--concrete'), concreteDark: token('--concrete-dark'), ink: token('--ink'), muted: token('--muted'),
+  ball: token('--ball'), split: token('--split'), value: token('--value'), hazard: token('--hazard'),
+};
+const fontDisplay = token('--font-display'), fontBody = token('--font-body');
+
+const STRIDE = 16;
+const glData = new ArrayBuffer((MAX + PILE_MAX) * STRIDE);
+const glF = new Float32Array(glData), glU = new Uint32Array(glData);
+let gl = null, uRes, uScale, uTop, uDpr;
+function initGL() {
+  gl = glCanvas.getContext('webgl', { alpha: true, antialias: false, premultipliedAlpha: true, powerPreference: 'high-performance' });
+  if (!gl) return;
+  const vs = `attribute vec2 a;attribute float s;attribute vec4 c;uniform vec2 uRes;uniform float uScale,uTop,uDpr;varying vec4 vC;
+    void main(){vec2 p=vec2(a.x*uScale,a.y*uScale+uTop);gl_Position=vec4(p.x/uRes.x*2.-1.,1.-p.y/uRes.y*2.,0.,1.);gl_PointSize=max(2.,s*2.*uScale*uDpr);vC=c;}`;
+  const fs = `precision mediump float;varying vec4 vC;void main(){vec2 q=gl_PointCoord-.5;float d=length(q);float m=1.-smoothstep(.38,.5,d);
+    vec3 col=mix(vC.rgb,vec3(1.),smoothstep(.22,.0,length(q+vec2(.12)))*.55);gl_FragColor=vec4(col*m,m*.8);}`;
+  const compile = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { gl = null; return; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, glData.byteLength, gl.DYNAMIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, 'a'), aSize = gl.getAttribLocation(prog, 's'), aCol = gl.getAttribLocation(prog, 'c');
+  gl.enableVertexAttribArray(aPos); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, STRIDE, 0);
+  gl.enableVertexAttribArray(aSize); gl.vertexAttribPointer(aSize, 1, gl.FLOAT, false, STRIDE, 8);
+  gl.enableVertexAttribArray(aCol); gl.vertexAttribPointer(aCol, 4, gl.UNSIGNED_BYTE, true, STRIDE, 12);
+  uRes = gl.getUniformLocation(prog, 'uRes'); uScale = gl.getUniformLocation(prog, 'uScale');
+  uTop = gl.getUniformLocation(prog, 'uTop'); uDpr = gl.getUniformLocation(prog, 'uDpr');
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
+}
+
+function resize() {
+  const rect = field.getBoundingClientRect();
+  if (rect.width < 120 || rect.height < 160) return;   // too small to lay out: keep the last good size
+  view.W = rect.width; view.H = rect.height;
+  view.dpr = Math.min(2, window.devicePixelRatio || 1);
+  view.resPx = Math.min(view.H * 0.21, view.W * 0.3);
+  RES = view.resPx / view.W;
+  A = (view.H - view.resPx) / view.W;
+  for (const c of [bgCanvas, glCanvas, fxCanvas]) {
+    c.width = Math.round(view.W * view.dpr);
+    c.height = Math.round(view.H * view.dpr);
+  }
+  if (gl) gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+  layout();
+}
+const WX = x => x * view.W;
+const WY = y => view.resPx + y * view.W;
+
+function drawBg() {
+  const c = bgCtx, W = view.W, H = view.H;
+  c.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = C.deep;
+  c.fillRect(0, 0, W, view.resPx);
+  for (let f = 0; f < S.floors; f++) {
+    c.fillStyle = f % 2 ? C.panel : C.ground;
+    c.fillRect(0, WY(f * floorH), W, floorH * W + 1);
+  }
+  c.fillStyle = C.line;
+  for (let k = 0; k < rowCount; k++) {
+    if (!rowOn[k]) continue;
+    const y = WY((k + 0.5) * ROW_GAP), off = (k & 1) ? PEG_DX * 0.5 : 0;
+    for (let i = 0; i * PEG_DX + off <= 1.0001; i++) {
+      c.beginPath();
+      c.arc(WX(i * PEG_DX + off), y, PEG_R * W, 0, 6.283);
+      c.fill();
+    }
+  }
+  c.lineWidth = 3;
+  c.strokeStyle = C.concreteDark;
+  c.lineCap = 'round';
+  for (let f = 0; f < S.floors - 1; f++) {
+    const bottom = (f + 1) * floorH, top = f * floorH + floorH * funnelStart;
+    const gaps = FUNNEL_GAPS[f], half = 0.05;
+    const edges = [0, ...gaps.flatMap(g => [g - half, g + half]), 1];
+    for (let i = 0; i < edges.length; i += 2) {
+      const a = edges[i], b = edges[i + 1], mid = (a + b) / 2;
+      c.beginPath();
+      if (a === 0) { c.moveTo(WX(0), WY(top)); c.lineTo(WX(b), WY(bottom)); }
+      else if (b === 1) { c.moveTo(WX(1), WY(top)); c.lineTo(WX(a), WY(bottom)); }
+      else { c.moveTo(WX(a), WY(bottom)); c.lineTo(WX(mid), WY(top)); c.lineTo(WX(b), WY(bottom)); }
+      c.stroke();
+    }
+  }
+  c.font = `600 11px ${fontBody}`;
+  c.textAlign = 'left';
+  c.fillStyle = C.muted;
+  for (let f = 0; f < S.floors; f++) c.fillText(`PIANO ${f + 1}`, 8, WY(f * floorH) + 15);
+  c.fillStyle = C.concreteDark;
+  c.fillRect(0, H - 5, W, 5);
+}
+
+function drawDam(c, f) {
+  const W = view.W, top = view.resPx - DAM_T * W, h = DAM_T * W;
+  const halfOpen = doorOpen * W * 0.5;
+  c.fillStyle = C.concrete;
+  c.fillRect(-2, top, W * 0.5 - halfOpen + 2, h);
+  c.fillRect(W * 0.5 + halfOpen, top, W * 0.5 - halfOpen + 2, h);
+  c.fillStyle = C.concreteDark;
+  c.fillRect(-2, top + h - 3, W * 0.5 - halfOpen + 2, 3);
+  c.fillRect(W * 0.5 + halfOpen, top + h - 3, W * 0.5 - halfOpen + 2, 3);
+  if (doorOpen < 0.05) {
+    c.fillStyle = C.deep;
+    c.fillRect(W * 0.5 - W * 0.035, top, W * 0.07, h);
+  }
+  if (f >= 0.9 && doorOpen < 0.05) {
+    c.save();
+    c.beginPath(); c.rect(0, top, W, 5); c.clip();
+    c.fillStyle = C.hazard;
+    c.fillRect(0, top, W, 5);
+    c.fillStyle = C.deep;
+    for (let x = -10 + (time * 40) % 24; x < W; x += 24) {
+      c.beginPath(); c.moveTo(x, top); c.lineTo(x + 12, top); c.lineTo(x + 7, top + 5); c.lineTo(x - 5, top + 5); c.fill();
+    }
+    c.restore();
+  }
+  // Staff gauge: the marked ruler real reservoirs use to read the water level.
+  const gx = W - 15, gTop = 7, gBot = top - 5;
+  c.fillStyle = C.ground;
+  c.globalAlpha = 0.8;
+  c.fillRect(gx - 7, gTop - 2, 20, gBot - gTop + 4);
+  c.globalAlpha = 1;
+  c.strokeStyle = C.ink;
+  c.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    const y = gBot - (gBot - gTop) * i / 10;
+    c.beginPath(); c.moveTo(gx - (i % 5 ? 2 : 5), y); c.lineTo(gx + 5, y); c.stroke();
+  }
+  const ly = gBot - (gBot - gTop) * f;
+  c.fillStyle = f >= 0.99 ? C.value : C.hazard;
+  c.beginPath(); c.moveTo(gx + 12, ly - 5); c.lineTo(gx + 12, ly + 5); c.lineTo(gx + 5, ly); c.fill();
+  if (f > 0.04) {
+    c.globalAlpha = 0.85;
+    c.fillStyle = C.deep;
+    c.fillRect(0, 0, 74, 44);
+    c.globalAlpha = 1;
+    c.textAlign = 'left';
+    c.font = `16px ${fontDisplay}`;
+    c.fillStyle = C.ink;
+    c.fillText(`×${fmtMult(pressure(f))}`, 9, 21);
+    c.font = `600 11px ${fontBody}`;
+    c.fillStyle = C.muted;
+    c.fillText('PRESSIONE', 9, 35);
+  }
+}
+
+function drawGates(c) {
+  const W = view.W;
+  for (const G of gates) {
+    const color = G.type === 'split' ? C.split : C.value;
+    const x0 = WX(G.x0), x1 = WX(G.x1), y = WY(G.y);
+    const glow = G.flash;
+    c.globalAlpha = 0.2 + 0.3 * glow;
+    c.fillStyle = color;
+    c.fillRect(x0, y - 9, x1 - x0, 18);
+    c.globalAlpha = 1;
+    c.fillRect(x0, y - 2 - glow, x1 - x0, 4 + 2 * glow);
+    const label = `${G.type === 'split' ? 'PALLINE' : 'VALORE'} ×${fmtMult(gateMult(G))}`;
+    c.font = `700 ${12 + 2 * glow}px ${fontBody}`;
+    const tw = c.measureText(label).width + 10;
+    const cx = (x0 + x1) / 2;
+    c.fillStyle = C.deep;
+    c.fillRect(cx - tw / 2, y - 8, tw, 16);
+    c.fillStyle = color;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(label, cx, y + 0.5);
+    c.textBaseline = 'alphabetic';
+  }
+}
+
+function drawFloaters(c, dt) {
+  c.textAlign = 'center';
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.t += dt;
+    if (f.t > 0.9) { floaters.splice(i, 1); continue; }
+    c.globalAlpha = 1 - f.t / 0.9;
+    c.font = `${f.size}px ${fontDisplay}`;
+    c.fillStyle = C.ink;
+    c.strokeStyle = C.deep;
+    c.lineWidth = 3;
+    const y = f.y - f.t * 46;
+    c.strokeText(f.txt, f.x, y);
+    c.fillText(f.txt, f.x, y);
+  }
+  c.globalAlpha = 1;
+}
+
+function draw(dt) {
+  const f = holdTimer > 0 ? heldFill : damFill();
+  const shownPile = Math.floor(f * pileSlots);
+  const jitter = holdTimer > 0 ? 0.006 : 0.0016 * Math.pow(f, 3);
+  let w = 0;
+  for (let i = 0; i < n; i++, w += 4) {
+    glF[w] = px[i]; glF[w + 1] = py[i]; glF[w + 2] = rad[i]; glU[w + 3] = col[i];
+  }
+  const stored = damTotal() || 1;
+  const cum = [];
+  S.store.reduce((a, b, k) => (cum[k] = (a + b) / stored, a + b), 0);
+  for (let i = 0; i < shownPile; i++, w += 4) {
+    let pk = 0;
+    while (pk < cum.length - 1 && pileMix[i] > cum[pk]) pk++;
+    const wob = jitter ? Math.sin(time * 31 + i * 1.7) * jitter : 0;
+    glF[w] = pileX[i] + wob; glF[w + 1] = pileY[i] + (jitter ? Math.cos(time * 27 + i) * jitter : 0);
+    glF[w + 2] = pileR; glU[w + 3] = COLS[pk][0];
+  }
+  const total = n + shownPile;
+  if (gl) {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uRes, view.W, view.H);
+    gl.uniform1f(uScale, view.W);
+    gl.uniform1f(uTop, view.resPx);
+    gl.uniform1f(uDpr, view.dpr);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(glData, 0, total * 4));
+    gl.drawArrays(gl.POINTS, 0, total);
+  }
+  const c = fxCtx;
+  c.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  c.clearRect(0, 0, view.W, view.H);
+  if (!gl) {
+    c.fillStyle = C.ball;
+    for (let i = 0; i < n; i++) c.fillRect(WX(px[i]) - 2, WY(py[i]) - 2, 4, 4);
+  }
+  drawGates(c);
+  drawDam(c, f);
+  drawFloaters(c, dt);
+  for (const G of gates) G.flash = Math.max(0, G.flash - dt * 4);
+  if (flash > 0) {
+    c.fillStyle = C.ink;
+    c.globalAlpha = flash * 0.5;
+    c.fillRect(0, 0, view.W, view.H);
+    c.globalAlpha = 1;
+    flash = Math.max(0, flash - dt * 2.5);
+  }
+  if (shake > 0.2 && !reduceMotion) {
+    field.style.transform = `translate(${(Math.random() - 0.5) * shake}px, ${(Math.random() - 0.5) * shake}px)`;
+    shake *= Math.pow(0.03, dt);
+  } else if (field.style.transform) {
+    field.style.transform = '';
+    shake = 0;
+  }
+}
+
+/* ========================= Interface ========================= */
+const nf = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat('it-IT', { maximumSignificantDigits: 3 });
+const UNITS = ['', 'k', 'M', 'Mld', 'T', 'aa', 'ab', 'ac', 'ad'];
+function fmt(v) {
+  if (!isFinite(v)) return '∞';
+  if (v < 10000) return nf.format(Math.floor(v));
+  const e = Math.min(UNITS.length - 1, Math.floor(Math.log10(v) / 3));
+  return nf2.format(v / Math.pow(1000, e)) + ' ' + UNITS[e];
+}
+const fmtMult = v => nf1.format(v);
+
+const costAt = ([base, grow], lv) => base * Math.pow(grow, lv);
+const fmtRate = v => nf2.format(v);
+function fmtTime(sec) {
+  if (!isFinite(sec)) return '--';
+  const t = Math.ceil(sec);
+  if (t >= 3600) return `${Math.floor(t / 3600)} h ${Math.floor(t / 60) % 60} min`;
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+}
+
+function ballItems(i) {
+  const b = BALLS[i], L = S.lv[i];
+  if (!S.owned[i]) {
+    return [{
+      id: `unlock.${i}`, name: `Sblocca ${b.name}`, effect: b.blurb, cost: b.unlock, can: true,
+      wide: true,
+      apply: () => { S.owned[i] = true; },
+    }];
+  }
+  const perkMaxed = L.perk >= b.perkMax;
+  return [
+    {
+      id: `${i}.rate`, name: 'Frequenza', cost: costAt(b.costs.rate, L.rate), can: true,
+      effect: `${fmtRate(rateOf(i))} → ${fmtRate(rateOf(i) * TUNE.rateGrow)} al secondo`,
+      apply: () => { L.rate++; },
+    },
+    {
+      id: `${i}.value`, name: 'Valore', cost: costAt(b.costs.value, L.value), can: true,
+      effect: `${fmtRate(valueOf(i))} → ${fmtRate(valueOf(i) * TUNE.valueGrow)} monete`,
+      apply: () => { L.value++; },
+    },
+    {
+      id: `${i}.store`, name: 'Riserva', cost: costAt(b.costs.store, L.store), can: true,
+      effect: `diga +${fmtRate(fillOf(i))} → +${fmtRate(fillOf(i) * TUNE.storeGrow)} al secondo`,
+      apply: () => { L.store++; },
+    },
+    {
+      id: `${i}.perk`, name: b.perkName, cost: costAt(b.costs.perk, L.perk), can: !perkMaxed,
+      effect: perkMaxed ? 'al massimo' : b.perkText(L.perk),
+      apply: () => { L.perk++; },
+    },
+  ];
+}
+
+function plantItems() {
+  const allGates = S.gates >= MAX_FLOORS * 3;
+  const nextGate = allGates ? null : GATE_PLAN[Math.floor(S.gates / 3)][S.gates % 3];
+  const floorCost = TUNE.costFloor[S.floors - 1];
+  return [
+    {
+      id: 'dam', name: 'Diga più alta', cost: costAt(TUNE.costDam, S.damLv), can: true,
+      effect: `capienza ${fmt(damCap())} → ${fmt(damCap() * TUNE.capGrow)}`,
+      apply: () => { S.damLv++; buildPile(); },
+    },
+    {
+      id: 'press', name: 'Paratoie', cost: costAt(TUNE.costPress, S.pressLv), can: true,
+      effect: `pressione ×${fmtMult(1 + pressureMax())} → ×${fmtMult(1 + pressureMax() + TUNE.pressureStep)}`,
+      apply: () => { S.pressLv++; },
+    },
+    {
+      id: 'gate',
+      name: allGates ? 'Potenzia valore' : 'Nuova barriera',
+      cost: allGates ? costAt(TUNE.costBoost, S.boost) : costAt(TUNE.costGate, S.gates - 1),
+      can: allGates || S.gates < S.floors * 3,
+      effect: allGates ? 'barriere valore +50%'
+        : S.gates >= S.floors * 3 ? 'serve un nuovo piano'
+        : `${nextGate[0] === 'split' ? 'palline' : 'valore'} ×${nextGate[1]}`,
+      apply: () => { if (allGates) S.boost++; else S.gates++; layout(); },
+    },
+    {
+      id: 'floor', name: S.floors < MAX_FLOORS ? `Piano ${S.floors + 1}` : 'Torre completa',
+      cost: floorCost, can: S.floors < MAX_FLOORS,
+      effect: S.floors < MAX_FLOORS ? 'la cascata si allunga' : `${MAX_FLOORS} piani costruiti`,
+      apply: () => { S.floors++; layout(); },
+    },
+  ];
+}
+const tabItems = t => (t === PLANT_TAB ? plantItems() : ballItems(t));
+const allItems = () => [...BALLS.flatMap((b, i) => ballItems(i)), ...plantItems()];
+
+function buyItem(item) {
+  if (!item.can || S.coins < item.cost) return false;
+  S.coins -= item.cost;
+  item.apply();
+  refreshKinds();
+  save();
+  return true;
+}
+function buy(id) {
+  const item = allItems().find(it => it.id === id);
+  return item ? buyItem(item) : false;
+}
+
+const tabsEl = $('tabs');
+const tabEls = [...BALLS.map((b, i) => [b.name, b.hex, i]), ['Impianto', C.concrete, PLANT_TAB]].map(([label, hex, i]) => {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = i === PLANT_TAB ? 'tab plant' : 'tab';
+  el.id = `tab-${i}`;
+  el.setAttribute('role', 'tab');
+  el.style.setProperty('--dot', hex);
+  el.innerHTML = '<span class="dot"></span><span class="tab-label"></span>';
+  el.children[1].textContent = label;
+  el.addEventListener('click', () => { S.tab = i; audio.init(); refreshUI(); });
+  tabsEl.append(el);
+  return el;
+});
+const slots = [0, 1, 2, 3].map(i => {
+  const el = $(`slot-${i}`);
+  el.innerHTML = '<span class="name"></span><span class="cost"></span><span class="effect"></span>';
+  const slot = { el, name: el.children[0], cost: el.children[1], effect: el.children[2], item: null };
+  el.addEventListener('click', () => {
+    audio.init();
+    if (slot.item && buyItem(slot.item)) { audio.click(); refreshUI(); }
+  });
+  return slot;
+});
+
+const hintEl = $('hint');
+const coinsEl = $('coins'), incomeEl = $('income'), liveEl = $('live'), statsEl = $('stats');
+const damBtn = $('dam-btn'), damMain = damBtn.querySelector('.main'), damSub = damBtn.querySelector('.sub');
+const resultEl = $('result');
+let shownCoins = S.coins, resultTimer = 0;
+
+function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+function refreshUI() {
+  setText(coinsEl, fmt(shownCoins));
+  setText(liveEl, fmt(liveLogical));
+  const f = damFill(), busy = holdTimer > 0 || floodActive;
+  const ready = !busy && f >= TUNE.minOpen;
+  damBtn.disabled = !ready;
+  damBtn.classList.toggle('ready', ready);
+  damBtn.classList.toggle('full', ready && f >= 0.999);
+  damBtn.style.setProperty('--fill', `${(f * 100).toFixed(1)}%`);
+  setText(damMain, busy ? 'VALANGA!' : f >= 0.999 ? 'DIGA PIENA: APRI!' : 'APRI LA DIGA');
+  const toFull = fillRate() > 0 ? (damCap() - damTotal()) / fillRate() : Infinity;
+  const eta = f >= 0.999 ? '' : ` · piena tra ${fmtTime(toFull)}`;
+  setText(damSub, busy ? `${fmt(floodGain)} monete finora`
+    : ready ? `${fmt(damTotal())} palline · ×${fmtMult(pressure(f))}${eta}`
+    : `Si riempie… ${Math.floor(f * 100)}%${eta}`);
+
+  tabEls.forEach((el, i) => {
+    el.setAttribute('aria-selected', String(S.tab === i));
+    el.classList.toggle('locked', i < PLANT_TAB && !S.owned[i]);
+    el.classList.toggle('alert', tabItems(i).some(it => it.can && S.coins >= it.cost));
+  });
+  const items = tabItems(S.tab);
+  slots.forEach((slot, i) => {
+    const item = items[i] || null;
+    slot.item = item;
+    slot.el.hidden = !item;
+    if (!item) return;
+    const afford = item.can && S.coins >= item.cost;
+    slot.el.disabled = !afford;
+    slot.el.classList.toggle('buy', afford);
+    slot.el.classList.toggle('wide', !!item.wide);
+    setText(slot.name, item.name);
+    setText(slot.cost, item.can && isFinite(item.cost) ? fmt(item.cost) : '');
+    setText(slot.effect, item.effect);
+  });
+  hintEl.hidden = !!S.tapped;
+}
+
+function showResult() {
+  if (!lastFlood) return;
+  const { gain, peak, record } = lastFlood;
+  resultEl.innerHTML = '';
+  const add = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; resultEl.append(s); };
+  if (record) add('record', 'Nuovo record');
+  add('big', `+${fmt(gain)}`);
+  add('small', `Picco di ${fmt(peak)} palline`);
+  resultEl.hidden = false;
+  resultEl.style.animation = 'none';
+  void resultEl.offsetWidth;
+  resultEl.style.animation = '';
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(() => { resultEl.hidden = true; }, 2600);
+}
+
+function tryOpen() {
+  audio.init();
+  openDam();
+  refreshUI();
+}
+damBtn.addEventListener('click', tryOpen);
+fxCanvas.addEventListener('pointerdown', e => {
+  const r = fxCanvas.getBoundingClientRect();
+  audio.init();
+  if (e.clientY - r.top < view.resPx) return;
+  if (dropAt((e.clientX - r.left) / view.W)) {
+    S.tapped = true;
+    audio.blip(2);
+  }
+});
+$('mute-btn').addEventListener('click', e => {
+  audio.init();
+  audio.setMuted(!audio.muted);
+  e.currentTarget.textContent = audio.muted ? 'Audio no' : 'Audio sì';
+});
+function hardReset() {
+  Object.assign(S, freshState());
+  n = 0; liveLogical = 0; floodLive = 0; floodActive = false; holdTimer = 0;
+  emitAcc.fill(0);
+  floaters.length = 0; incomeWindow.length = 0;
+  exitGain = 0; exitBurst = 0; floaterGain = 0; lastFlood = null;
+  refreshKinds();
+  doorTarget = 0; doorOpen = 0;
+  shownCoins = 0;
+  layout();
+  save();
+}
+const resetBtn = $('reset-btn');
+let resetArmed = 0;
+resetBtn.addEventListener('click', () => {
+  if (Date.now() - resetArmed < 3000) {
+    hardReset();
+    resetBtn.textContent = 'Ricomincia';
+    resetArmed = 0;
+    return;
+  }
+  resetArmed = Date.now();
+  resetBtn.textContent = 'Sicuro?';
+  setTimeout(() => { resetBtn.textContent = 'Ricomincia'; }, 3000);
+});
+
+/* ========================= Main loop ========================= */
+const H = 1 / 60;
+let floaterGain = 0, lastFloater = 0;
+let running = false, last = 0, acc = 0, uiClock = 0, statClock = 0, frames = 0, frameMs = 0, fps = 60, noteStep = 0;
+
+function frame(t) {
+  const raw = (t - last) / 1000;
+  last = t;
+  const dt = Math.min(raw, 0.05);
+  acc += dt;
+  let steps = 3;
+  while (acc >= H && steps-- > 0) { tick(H); acc -= H; }
+  if (steps <= 0) acc = 0;
+
+  if (gateHits > 0) {
+    noteStep = floodActive ? Math.min(24, Math.floor(Math.log2(1 + floodHits) * 1.4)) : (noteStep + 1) % 5;
+    audio.blip(noteStep);
+    gateHits = 0;
+  }
+  uiClock += dt;
+  statClock += raw; frames++; frameMs += raw * 1000;
+  if (uiClock > 0.12) {
+    if (exitGain > 0) {
+      incomeWindow.push([t, exitGain]);
+      floaterGain += exitGain;
+      exitGain = 0;
+    }
+    if (floaterGain > 0 && t - lastFloater > 420) {
+      const size = Math.min(26, 13 + Math.log10(1 + floaterGain) * 1.6);
+      floaters.push({ x: view.W * (0.3 + 0.4 * Math.random()), y: view.H - 10, txt: `+${fmt(floaterGain)}`, size, t: 0 });
+      floaterGain = 0;
+      lastFloater = t;
+    }
+    audio.rain(Math.min(0.32, exitBurst / 500));
+    exitBurst = 0;
+    uiClock = 0;
+    while (incomeWindow.length && t - incomeWindow[0][0] > 4000) incomeWindow.shift();
+    shownCoins += (S.coins - shownCoins) * 0.45;
+    if (Math.abs(S.coins - shownCoins) < 1) shownCoins = S.coins;
+    const rate = incomeWindow.reduce((a, b) => a + b[1], 0) / 4;
+    setText(incomeEl, `${fmt(rate)} al secondo`);
+    refreshUI();
+  }
+  if (statClock >= 1) {
+    fps = frames / statClock;
+    const avg = frameMs / frames;
+    if (avg > 24 && n > softCap * 0.6) softCap = Math.max(4000, Math.floor(softCap * 0.8));
+    else if (avg < 18) softCap = Math.min(MAX, Math.floor(softCap * 1.05));
+    setText(statsEl, `${Math.round(fps)} fps · ${nf.format(n)} sim · max ${nf.format(softCap)}${window.VALANGA_BUILD ? ` · ${window.VALANGA_BUILD}` : ""}`);
+    statClock = 0; frames = 0; frameMs = 0;
+  }
+  draw(dt);
+  requestAnimationFrame(frame);
+}
+
+function welcomeBack() {
+  const away = (Date.now() - (S.savedAt || Date.now())) / 1000;
+  if (away < 30) return;
+  const before = damTotal();
+  const rate = fillRate();
+  const add = Math.min(damCap() - before, rate * away);
+  if (add <= 1) return;
+  BALLS.forEach((b, k) => { S.store[k] += add * fillOf(k) / rate; });
+  floaters.push({ x: view.W / 2, y: view.resPx + 70, txt: 'La diga è salita mentre eri via', size: 15, t: -1.2 });
+}
+
+initGL();
+resize();
+new ResizeObserver(resize).observe(field);
+window.addEventListener('pagehide', save);
+setInterval(save, 5000);
+welcomeBack();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => drawBg());
+refreshUI();
+running = true;
+last = performance.now();
+requestAnimationFrame(frame);
+
+/* Hooks for automated pacing and stress tests. */
+window.__valanga = {
+  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, fillRate, layout, hardReset, welcomeBack, dropAt, refreshKinds,
+  set softCap(v) { softCap = v; },
+  get stats() { return { n, softCap, liveLogical, fps, floodActive, floodGain, floodPeak, webgl: !!gl }; },
+};
+</script>

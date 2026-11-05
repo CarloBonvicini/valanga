@@ -1,0 +1,38 @@
+name: Deploy
+
+# Runs only when the game changes, and usually finishes in under a minute.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'prototype/**'
+      - 'web/**'
+      - 'scripts/build.sh'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A newer push replaces a deploy still in progress.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/build.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: pages
+        uses: actions/deploy-pages@v4
