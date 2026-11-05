@@ -1,2 +1,8 @@
 dist/
 .claude/
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+*.p12
+*.pem

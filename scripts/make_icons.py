@@ -1,5 +1,5 @@
 """Draws the app icons (a dam holding back balls) with the standard library only."""
-import math
+import os
 import random
 import struct
 import zlib
@@ -60,3 +60,11 @@ def write_png(path, size, raw):
 shapes = build_shapes()
 for size in (192, 512):
     write_png(f'web/icon-{size}.png', size, render(size, shapes))
+
+RES = 'android/app/src/main/res'
+for folder, size in (('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)):
+    os.makedirs(f'{RES}/mipmap-{folder}', exist_ok=True)
+    write_png(f'{RES}/mipmap-{folder}/ic_launcher.png', size, render(size, shapes))
+os.makedirs(f'{RES}/drawable-nodpi', exist_ok=True)
+write_png(f'{RES}/drawable-nodpi/ic_foreground.png', 432, render(432, shapes))
+write_png(f'{RES}/drawable-nodpi/splash.png', 512, render(512, shapes))

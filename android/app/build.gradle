@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The pipeline passes an ever-growing build number, which Google Play requires for each upload.
+def buildNumber = (project.findProperty('buildNumber') ?: '1') as int
+def keystorePath = System.getenv('VALANGA_KEYSTORE_PATH')
+def keystorePassword = System.getenv('VALANGA_KEYSTORE_PASSWORD')
+
+android {
+    namespace 'io.github.carlobonvicini.valanga'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.carlobonvicini.valanga'
+        minSdk 23
+        targetSdk 36
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storeType 'pkcs12'
+                storePassword keystorePassword
+                keyAlias 'valanga'
+                keyPassword keystorePassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystorePath) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
+}

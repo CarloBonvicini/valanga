@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Valanga</string>
+    <string name="game_url" translatable="false">https://carlobonvicini.github.io/valanga/</string>
+    <string name="asset_statements" translatable="false">[{\"relation\":[\"delegate_permission/common.handle_all_urls\"],\"target\":{\"namespace\":\"web\",\"site\":\"https://carlobonvicini.github.io\"}}]</string>
+</resources>

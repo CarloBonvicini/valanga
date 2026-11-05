@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.carlobonvicini.valanga",
+      "sha256_cert_fingerprints": ["2C:19:5B:13:C8:63:BC:F7:49:6D:48:28:5E:01:6F:30:45:59:C2:34:17:20:28:FC:E3:7B:E7:54:50:D0:74:2E"]
+    }
+  }
+]
