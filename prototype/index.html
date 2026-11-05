@@ -140,7 +140,7 @@ body {
 #dam-btn:disabled { cursor: default; }
 @keyframes throb { from { transform: scale(1); } to { transform: scale(1.025); filter: brightness(1.15); } }
 
-#tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
+#tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; }
 .tab {
   position: relative;
   display: grid;
@@ -173,6 +173,36 @@ body {
   border-radius: 50%;
   background: var(--ball);
 }
+#rebuild-panel {
+  position: absolute;
+  inset-inline: 16px;
+  top: 22%;
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: var(--ground-deep);
+  border: 2px solid var(--split);
+  border-radius: 10px;
+}
+#rebuild-panel h2 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 400; color: var(--split); }
+#rebuild-panel p { margin: 0; font-size: 15px; line-height: 1.3; }
+.rebuild-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rebuild-actions button {
+  appearance: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  padding-block: 10px;
+  background: var(--ground);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.rebuild-actions button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.rebuild-actions #rebuild-yes { border-color: var(--split); background: var(--split); color: var(--ground-deep); font-weight: 700; }
+.shop-btn.perma { border-color: var(--split); }
+.shop-btn.perma .cost { color: var(--split); }
 #shop { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; min-height: 116px; }
 #hint {
   position: absolute;
@@ -259,6 +289,15 @@ body {
     <canvas id="fx"></canvas>
     <div id="stats"></div>
     <div id="result" hidden></div>
+    <section id="rebuild-panel" role="dialog" aria-labelledby="rebuild-title" hidden>
+      <h2 id="rebuild-title">Ricostruire la diga?</h2>
+      <p id="rebuild-gain"></p>
+      <p>Perdi monete, palline, diga e torre. Tieni cristalli, potenziamenti permanenti e record.</p>
+      <div class="rebuild-actions">
+        <button id="rebuild-no" type="button">Annulla</button>
+        <button id="rebuild-yes" type="button">Ricostruisci</button>
+      </div>
+    </section>
     <div id="hint" hidden>Tocca lo schermo per caricare più in fretta</div>
   </main>
 
@@ -295,6 +334,9 @@ const TUNE = {
   costGate: [15, 5.5],
   costBoost: [2e9, 6],
   costFloor: [20000, 8e6],
+  crystalScale: 1e5,                  // crystals = cube root of run coins / scale
+  permRate: 1.25, permValue: 1.3, permCap: 1.2,
+  costPerm: [2, 1.9],
 };
 /* Balls are born behind the dam, one type at a time, and only leave through the gap. */
 const BALLS = [
@@ -330,7 +372,7 @@ const BALLS = [
     blurb: 'Rarissima: le barriere valore la moltiplicano molto di più.',
   },
 ];
-const PLANT_TAB = BALLS.length, DAM_TAB = PLANT_TAB, TOWER_TAB = PLANT_TAB + 1;
+const PLANT_TAB = BALLS.length, DAM_TAB = PLANT_TAB, TOWER_TAB = PLANT_TAB + 1, CRYSTAL_TAB = PLANT_TAB + 2;
 const MAX_FLOORS = 3;
 const GATE_PLAN = [
   [['split', 2], ['value', 2], ['split', 2]],
@@ -351,6 +393,7 @@ function freshState() {
     owned: BALLS.map((b, i) => i === 0),
     lv: BALLS.map(() => ({ rate: 0, value: 0, perk: 0 })),
     store: BALLS.map(() => 0),
+    crystals: 0, runs: 0, perm: { rate: 0, value: 0, cap: 0 },
     tab: 0, tapped: false, savedAt: Date.now(),
   };
 }
@@ -365,11 +408,13 @@ function save() {
 }
 
 const stepped = (steps, grow, lv) => (lv < steps.length ? steps[lv] : steps[steps.length - 1] * Math.pow(grow, lv - steps.length + 1));
-const rateAt = (i, lv) => BALLS[i].rate * stepped(TUNE.rateSteps, TUNE.rateGrow, lv);
-const valueAt = (i, lv) => BALLS[i].value * stepped(TUNE.valueSteps, TUNE.valueGrow, lv);
+const rateAt = (i, lv) => BALLS[i].rate * stepped(TUNE.rateSteps, TUNE.rateGrow, lv) * Math.pow(TUNE.permRate, S.perm.rate);
+const valueAt = (i, lv) => BALLS[i].value * stepped(TUNE.valueSteps, TUNE.valueGrow, lv) * Math.pow(TUNE.permValue, S.perm.value);
 const rateOf = i => rateAt(i, S.lv[i].rate);
 const valueOf = i => valueAt(i, S.lv[i].value);
-const damCap = () => TUNE.capBase * Math.pow(TUNE.capGrow, S.damLv);
+const damCap = () => TUNE.capBase * Math.pow(TUNE.capGrow, S.damLv) * Math.pow(TUNE.permCap, S.perm.cap);
+const crystalGain = () => Math.floor(Math.cbrt(S.total / TUNE.crystalScale));
+const crystalsVisible = () => S.crystals > 0 || S.runs > 0 || crystalGain() >= 1;
 const damTotal = () => S.store.reduce((a, b) => a + b, 0);
 const damFill = () => Math.min(1, damTotal() / damCap());
 const leakK = () => TUNE.leakPerBall * Math.pow(TUNE.sealGrow, S.sealLv);
@@ -1288,12 +1333,32 @@ function towerItems() {
     },
   ];
 }
-const tabItems = t => (t === DAM_TAB ? damItems() : t === TOWER_TAB ? towerItems() : ballItems(t));
+function crystalItems() {
+  const gain = crystalGain(), nextAt = TUNE.crystalScale * Math.pow(gain + 1, 3);
+  const perm = (id, name, key, grow, label) => ({
+    id: `perm.${id}`, name, cost: Math.ceil(costAt(TUNE.costPerm, S.perm[key])), can: true, crystal: true,
+    effect: `${label} ×${fmtMult(Math.pow(grow, S.perm[key]))} → ×${fmtMult(Math.pow(grow, S.perm[key] + 1))}`,
+    apply: () => { S.perm[key]++; },
+  });
+  return [
+    perm('rate', 'Sorgente', 'rate', TUNE.permRate, 'frequenza'),
+    perm('value', 'Conio', 'value', TUNE.permValue, 'valore'),
+    perm('cap', 'Bacino', 'cap', TUNE.permCap, 'capienza'),
+    {
+      id: 'rebuild', name: 'Ricostruisci', cost: 0, can: gain >= 1, rebuild: true,
+      costText: `+${nf.format(gain)} ◆`,
+      effect: `prossimo a ${fmt(nextAt)} monete`,
+      apply: () => {},
+    },
+  ];
+}
+const tabItems = t => (t === DAM_TAB ? damItems() : t === TOWER_TAB ? towerItems() : t === CRYSTAL_TAB ? crystalItems() : ballItems(t));
 const allItems = () => [...BALLS.flatMap((b, i) => ballItems(i)), ...damItems(), ...towerItems()];
 
+const canPay = item => item.can && (item.rebuild || (item.crystal ? S.crystals : S.coins) >= item.cost);
 function buyItem(item) {
-  if (!item.can || S.coins < item.cost) return false;
-  S.coins -= item.cost;
+  if (item.rebuild || !canPay(item)) return false;
+  if (item.crystal) S.crystals -= item.cost; else S.coins -= item.cost;
   item.apply();
   refreshKinds();
   save();
@@ -1305,7 +1370,7 @@ function buy(id) {
 }
 
 const tabsEl = $('tabs');
-const tabEls = [...BALLS.map((b, i) => [b.name, b.hex, i]), ['Diga', C.hazard, DAM_TAB], ['Torre', C.concrete, TOWER_TAB]].map(([label, hex, i]) => {
+const tabEls = [...BALLS.map((b, i) => [b.name, b.hex, i]), ['Diga', C.hazard, DAM_TAB], ['Torre', C.concrete, TOWER_TAB], ['Cristalli', C.split, CRYSTAL_TAB]].map(([label, hex, i]) => {
   const el = document.createElement('button');
   el.type = 'button';
   el.className = i >= PLANT_TAB ? 'tab plant' : 'tab';
@@ -1324,6 +1389,7 @@ const slots = [0, 1, 2, 3].map(i => {
   const slot = { el, name: el.children[0], cost: el.children[1], effect: el.children[2], item: null };
   el.addEventListener('click', () => {
     audio.init();
+    if (slot.item && slot.item.rebuild) { if (canPay(slot.item)) openRebuild(); return; }
     if (slot.item && buyItem(slot.item)) { audio.click(); refreshUI(); }
   });
   return slot;
@@ -1353,7 +1419,8 @@ function refreshUI() {
   tabEls.forEach((el, i) => {
     el.setAttribute('aria-selected', String(S.tab === i));
     el.classList.toggle('locked', i < PLANT_TAB && !S.owned[i]);
-    el.classList.toggle('alert', tabItems(i).some(it => it.can && S.coins >= it.cost));
+    el.hidden = i === CRYSTAL_TAB && !crystalsVisible();
+    el.classList.toggle('alert', tabItems(i).some(canPay));
   });
   const items = tabItems(S.tab);
   slots.forEach((slot, i) => {
@@ -1361,26 +1428,25 @@ function refreshUI() {
     slot.item = item;
     slot.el.hidden = !item;
     if (!item) return;
-    const afford = item.can && S.coins >= item.cost;
+    const afford = canPay(item);
     slot.el.disabled = !afford;
+    slot.el.classList.toggle('perma', !!item.rebuild && afford);
     slot.el.classList.toggle('buy', afford);
     slot.el.classList.toggle('wide', !!item.wide);
     slot.el.classList.toggle('span', items.length === 2 || (items.length % 2 === 1 && i === items.length - 1 && !item.wide));
     setText(slot.name, item.name);
-    setText(slot.cost, item.can && isFinite(item.cost) ? fmt(item.cost) : '');
+    setText(slot.cost, item.costText || (item.can && isFinite(item.cost) ? `${fmt(item.cost)}${item.crystal ? ' ◆' : ''}` : ''));
     setText(slot.effect, item.effect);
   });
   hintEl.hidden = !!S.tapped;
 }
 
-function showResult() {
-  if (!lastFlood) return;
-  const { gain, peak, record } = lastFlood;
+function showBanner(big, small, note) {
   resultEl.innerHTML = '';
   const add = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; resultEl.append(s); };
-  if (record) add('record', 'Nuovo record');
-  add('big', `+${fmt(gain)}`);
-  add('small', `Picco di ${fmt(peak)} palline`);
+  if (note) add('record', note);
+  add('big', big);
+  add('small', small);
   resultEl.hidden = false;
   resultEl.style.animation = 'none';
   void resultEl.offsetWidth;
@@ -1388,6 +1454,38 @@ function showResult() {
   clearTimeout(resultTimer);
   resultTimer = setTimeout(() => { resultEl.hidden = true; }, 2600);
 }
+function showResult() {
+  if (!lastFlood) return;
+  const { gain, peak, record } = lastFlood;
+  showBanner(`+${fmt(gain)}`, `Picco di ${fmt(peak)} palline`, record ? 'Nuovo record' : '');
+}
+
+const rebuildPanel = $('rebuild-panel');
+function openRebuild() {
+  const gain = crystalGain();
+  setText($('rebuild-gain'), `Guadagni ${nf.format(gain)} ${gain === 1 ? 'cristallo' : 'cristalli'}.`);
+  rebuildPanel.hidden = false;
+  $('rebuild-no').focus();
+}
+function rebuild() {
+  const gain = crystalGain();
+  if (gain < 1) return false;
+  const keep = { crystals: S.crystals + gain, runs: S.runs + 1, perm: S.perm, best: S.best, tapped: S.tapped, tab: CRYSTAL_TAB };
+  Object.assign(S, freshState(), keep);
+  resetRun();
+  flash = 1;
+  shake = 16;
+  audio.boom(1);
+  audio.chord();
+  showBanner(`+${nf.format(gain)} ◆`, 'Spendili nei potenziamenti permanenti', `Diga ${S.runs + 1}`);
+  return true;
+}
+$('rebuild-no').addEventListener('click', () => { rebuildPanel.hidden = true; });
+$('rebuild-yes').addEventListener('click', () => {
+  rebuildPanel.hidden = true;
+  rebuild();
+  refreshUI();
+});
 
 function tryOpen() {
   audio.init();
@@ -1408,6 +1506,9 @@ $('mute-btn').addEventListener('click', e => {
 });
 function hardReset() {
   Object.assign(S, freshState());
+  resetRun();
+}
+function resetRun() {
   n = 0; bn = 0; liveLogical = 0; floodLive = 0; floodActive = false; holdTimer = 0; leakAcc = 0;
   emitAcc.fill(0);
   emitAcc[0] = 0.4;
@@ -1473,7 +1574,7 @@ function frame(t) {
     shownCoins += (S.coins - shownCoins) * 0.45;
     if (Math.abs(S.coins - shownCoins) < 1) shownCoins = S.coins;
     const rate = incomeWindow.reduce((a, b) => a + b[1], 0) / 4;
-    setText(incomeEl, `${fmt(rate)} al secondo`);
+    setText(incomeEl, `${fmt(rate)} al secondo${S.crystals > 0 ? ` · ${nf.format(S.crystals)} ◆` : ''}`);
     refreshUI();
   }
   if (statClock >= 1) {
@@ -1514,7 +1615,7 @@ requestAnimationFrame(frame);
 
 /* Hooks for automated pacing and stress tests. */
 window.__valanga = {
-  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, leakRate, layout, hardReset, welcomeBack, tapCharge, refreshKinds,
+  S, TUNE, BALLS, tick, openDam, buy, allItems, buyItem, damFill, damCap, damTotal, leakRate, layout, hardReset, crystalItems, crystalGain, rebuild, welcomeBack, tapCharge, refreshKinds,
   set headless(v) { headless = v; if (v) bn = 0; },
   get bodies() { return bn; },
   set softCap(v) { softCap = v; },
